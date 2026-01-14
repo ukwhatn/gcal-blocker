@@ -32,7 +32,7 @@ module.exports = {
 
     plugins: [
         new GasPlugin({
-            autoGlobalExportsFiles: ['**/*.ts'],
+            autoGlobalExportsFiles: ['**/index.ts'],
         }),
     ],
 };
