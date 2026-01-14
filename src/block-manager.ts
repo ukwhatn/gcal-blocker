@@ -34,6 +34,7 @@ export function syncCalendarPair(
     period.end,
     config.blockingStatuses
   );
+  console.log(`  ソースイベント数: ${blockCandidates.length}`);
 
   // ターゲットカレンダーの既存ブロックイベントを取得
   const existingBlocks = findExistingBlockEvents(
@@ -49,6 +50,7 @@ export function syncCalendarPair(
       relevantBlocks.set(key, event);
     }
   }
+  console.log(`  既存ブロック数: ${relevantBlocks.size}`);
 
   let created = 0;
   let deleted = 0;
@@ -64,6 +66,7 @@ export function syncCalendarPair(
     candidateKeys.add(key);
 
     if (!relevantBlocks.has(key)) {
+      console.log(`  作成: ${candidate.sourceStartTime.toISOString()} (${candidate.isAllDay ? '終日' : '時間指定'})`);
       createBlockEvent(targetCalendar, candidate);
       created++;
     }
@@ -72,6 +75,7 @@ export function syncCalendarPair(
   // 不要なブロックを削除（元イベントが削除/欠席になった場合）
   for (const [key, event] of relevantBlocks) {
     if (!candidateKeys.has(key)) {
+      console.log(`  削除: ${event.getStartTime().toISOString()}`);
       event.deleteEvent();
       deleted++;
     }
