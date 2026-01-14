@@ -4,7 +4,7 @@ import { CalendarConfig, SyncPeriod } from './types';
 export const BLOCK_TITLE = '予定あり(自動ブロック)';
 
 /** 同期対象期間（月数） */
-const SYNC_MONTHS = 3;
+const SYNC_MONTHS = 1;
 
 /**
  * スクリプトプロパティから設定を読み込む
