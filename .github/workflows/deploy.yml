@@ -57,7 +57,9 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Setup clasp credentials
-        run: echo '${{ secrets.CLASPRC_JSON }}' > ~/.clasprc.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: echo "$CLASPRC_JSON" > ~/.clasprc.json
 
       - name: Deploy to GAS
         run: bun run deploy
