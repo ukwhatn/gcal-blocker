@@ -83,3 +83,23 @@ export function syncCalendarPair(
 
   return { created, deleted };
 }
+
+/**
+ * 指定カレンダーから全ての自動ブロックイベントを削除
+ */
+export function clearBlockEvents(
+  calendarId: string,
+  period: SyncPeriod
+): number {
+  const calendar = getCalendar(calendarId);
+  const existingBlocks = findExistingBlockEvents(calendar, period.start, period.end);
+
+  let deleted = 0;
+  for (const [, event] of existingBlocks) {
+    console.log(`  削除: ${event.getStartTime().toISOString()}`);
+    event.deleteEvent();
+    deleted++;
+  }
+
+  return deleted;
+}

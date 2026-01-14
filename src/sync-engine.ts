@@ -1,6 +1,6 @@
 import { SyncResult } from './types';
 import { getConfig, getSyncPeriod } from './config';
-import { syncCalendarPair } from './block-manager';
+import { syncCalendarPair, clearBlockEvents } from './block-manager';
 
 /**
  * 全カレンダー間の同期を実行
@@ -44,4 +44,36 @@ export function runSync(): SyncResult {
   console.log(`合計: created=${result.created}, deleted=${result.deleted}, errors=${result.errors.length}`);
 
   return result;
+}
+
+/**
+ * 全カレンダーから自動ブロックイベントを削除
+ */
+export function clearAllBlockEvents(): { deleted: number; errors: string[] } {
+  const config = getConfig();
+  const period = getSyncPeriod();
+
+  console.log('=== ブロック削除開始 ===');
+  console.log(`対象カレンダー数: ${config.calendarIds.length}`);
+
+  let totalDeleted = 0;
+  const errors: string[] = [];
+
+  for (const calendarId of config.calendarIds) {
+    console.log(`--- ${calendarId} ---`);
+    try {
+      const deleted = clearBlockEvents(calendarId, period);
+      totalDeleted += deleted;
+      console.log(`  削除数: ${deleted}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${calendarId}: ${message}`);
+      console.error(`  エラー: ${message}`);
+    }
+  }
+
+  console.log('=== ブロック削除完了 ===');
+  console.log(`合計削除数: ${totalDeleted}`);
+
+  return { deleted: totalDeleted, errors };
 }

@@ -3,7 +3,7 @@
  * 複数カレンダー間で予定を相互にブロックする
  */
 
-import { runSync } from './sync-engine';
+import { runSync, clearAllBlockEvents } from './sync-engine';
 
 /**
  * カレンダー同期を実行
@@ -44,4 +44,17 @@ export function removeTrigger(): void {
     }
   }
   console.log('Existing triggers removed');
+}
+
+/**
+ * 全カレンダーから自動ブロックイベントを削除
+ */
+export function clearAllBlocks(): void {
+  try {
+    const result = clearAllBlockEvents();
+    console.log(`Clear completed: deleted=${result.deleted}, errors=${result.errors.length}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Clear failed: ${message}`);
+  }
 }
