@@ -34,6 +34,11 @@ export function getBlockableEvents(
     .filter((event) => {
       // 自動ブロックイベントは除外
       if (isAutoBlockEvent(event)) return false;
+      // EventType==DEFAULTのみ対象（Tasks等を除外）
+      // @types/google-apps-scriptにgetEventTypeが未定義のため型アサーション使用
+      const eventType = (event as unknown as { getEventType: () => unknown }).getEventType();
+      const defaultType = (CalendarApp as unknown as { EventType: { DEFAULT: unknown } }).EventType.DEFAULT;
+      if (eventType !== defaultType) return false;
       // 出欠ステータスでフィルタ
       const status = event.getMyStatus();
       return blockingStatuses.includes(status);
