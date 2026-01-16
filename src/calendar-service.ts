@@ -39,6 +39,11 @@ export function getBlockableEvents(
       const eventType = (event as unknown as { getEventType: () => unknown }).getEventType();
       const defaultType = (CalendarApp as unknown as { EventType: { DEFAULT: unknown } }).EventType.DEFAULT;
       if (eventType !== defaultType) return false;
+      // 「予定なし」（transparent）のイベントは除外
+      // @types/google-apps-scriptにgetTransparency/EventTransparencyが未定義のため型アサーション使用
+      const transparency = (event as unknown as { getTransparency: () => unknown }).getTransparency();
+      const transparentType = (CalendarApp as unknown as { EventTransparency: { TRANSPARENT: unknown } }).EventTransparency.TRANSPARENT;
+      if (transparency === transparentType) return false;
       // 出欠ステータスでフィルタ
       const status = event.getMyStatus();
       return blockingStatuses.includes(status);
