@@ -77,3 +77,45 @@ export function clearAllBlockEvents(): { deleted: number; errors: string[] } {
 
   return { deleted: totalDeleted, errors };
 }
+
+/**
+ * 同期対象期間外の自動ブロックイベントを削除
+ * SYNC_MONTHS縮小時の孤児化したブロックをクリーンアップ
+ */
+export function clearOutOfRangeBlockEvents(): { deleted: number; errors: string[] } {
+  const config = getConfig();
+  const period = getSyncPeriod();
+
+  // 同期終了日から6ヶ月後までを対象
+  const outOfRangeStart = period.end;
+  const outOfRangeEnd = new Date(period.end);
+  outOfRangeEnd.setMonth(outOfRangeEnd.getMonth() + 6);
+
+  console.log('=== 同期対象外ブロック削除開始 ===');
+  console.log(`対象期間: ${outOfRangeStart.toISOString()} ~ ${outOfRangeEnd.toISOString()}`);
+  console.log(`対象カレンダー数: ${config.calendarIds.length}`);
+
+  let totalDeleted = 0;
+  const errors: string[] = [];
+
+  for (const calendarId of config.calendarIds) {
+    console.log(`--- ${calendarId} ---`);
+    try {
+      const deleted = clearBlockEvents(calendarId, {
+        start: outOfRangeStart,
+        end: outOfRangeEnd,
+      });
+      totalDeleted += deleted;
+      console.log(`  削除数: ${deleted}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push(`${calendarId}: ${message}`);
+      console.error(`  エラー: ${message}`);
+    }
+  }
+
+  console.log('=== 同期対象外ブロック削除完了 ===');
+  console.log(`合計削除数: ${totalDeleted}`);
+
+  return { deleted: totalDeleted, errors };
+}

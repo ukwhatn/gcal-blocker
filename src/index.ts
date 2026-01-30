@@ -3,7 +3,7 @@
  * 複数カレンダー間で予定を相互にブロックする
  */
 
-import { runSync, clearAllBlockEvents } from './sync-engine';
+import { runSync, clearAllBlockEvents, clearOutOfRangeBlockEvents } from './sync-engine';
 
 /**
  * カレンダー同期を実行
@@ -56,5 +56,19 @@ export function clearAllBlocks(): void {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Clear failed: ${message}`);
+  }
+}
+
+/**
+ * 同期対象期間外の自動ブロックイベントを削除
+ * SYNC_MONTHS縮小時の孤児化したブロックをクリーンアップする際に使用
+ */
+export function clearOutOfRangeBlocks(): void {
+  try {
+    const result = clearOutOfRangeBlockEvents();
+    console.log(`Clear out-of-range completed: deleted=${result.deleted}, errors=${result.errors.length}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Clear out-of-range failed: ${message}`);
   }
 }
