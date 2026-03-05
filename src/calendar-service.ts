@@ -1,5 +1,5 @@
 import { BlockMetadata, BlockCandidate } from './types';
-import { BLOCK_TITLE } from './config';
+import { BLOCK_TITLE, EXCLUDED_PREFIXES } from './config';
 
 type Calendar = GoogleAppsScript.Calendar.Calendar;
 type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
@@ -34,6 +34,8 @@ export function getBlockableEvents(
     .filter((event) => {
       // 自動ブロックイベントは除外
       if (isAutoBlockEvent(event)) return false;
+      // 除外プレフィックスで始まるイベントは除外
+      if (EXCLUDED_PREFIXES.some((prefix) => event.getTitle().startsWith(prefix))) return false;
       // EventType==DEFAULTのみ対象（Tasks等を除外）
       // @types/google-apps-scriptにgetEventTypeが未定義のため型アサーション使用
       const eventType = (event as unknown as { getEventType: () => unknown }).getEventType();
