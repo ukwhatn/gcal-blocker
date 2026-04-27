@@ -56,25 +56,9 @@ IMPORTANT: ローカルからのデプロイは禁止。必ずPR経由でmainに
 1. `.clasp.json` に `scriptId` を設定
 2. GitHub Secretsに `CLASPRC_JSON` を設定（clasp認証情報）
 
-## サブエージェント呼び出し時の追加情報
-
-IMPORTANT: サブエージェント（ユーザーレベル汎用版）を呼び出す際は、以下の情報をタスク指示に含めること。
-
-### quality-checker / typecheck-runner / lint-runner
-
-対象: src/
-typecheck: bun run typecheck
-lint: bun run lint
-
-### self-reviewer / pr-reviewer
+## ブランチ
 
 ベースブランチ: main
-アーキテクチャルール:
-  - index.ts: エントリーポイント（グローバル関数エクスポートのみ）
-
-追加チェック:
-  - GAS固有のAPI（SpreadsheetApp等）の適切な使用
-  - グローバル関数はindex.tsでのみエクスポート
 
 ## 注意事項
 
