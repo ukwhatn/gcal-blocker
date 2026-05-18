@@ -62,7 +62,7 @@ export function clearAllBlockEvents(): { deleted: number; errors: string[] } {
   for (const calendarId of config.calendarIds) {
     console.log(`--- ${calendarId} ---`);
     try {
-      const deleted = clearBlockEvents(calendarId, period);
+      const deleted = clearBlockEvents(calendarId, period, config.calendarIds);
       totalDeleted += deleted;
       console.log(`  削除数: ${deleted}`);
     } catch (error) {
@@ -101,10 +101,11 @@ export function clearOutOfRangeBlockEvents(): { deleted: number; errors: string[
   for (const calendarId of config.calendarIds) {
     console.log(`--- ${calendarId} ---`);
     try {
-      const deleted = clearBlockEvents(calendarId, {
-        start: outOfRangeStart,
-        end: outOfRangeEnd,
-      });
+      const deleted = clearBlockEvents(
+        calendarId,
+        { start: outOfRangeStart, end: outOfRangeEnd },
+        config.calendarIds
+      );
       totalDeleted += deleted;
       console.log(`  削除数: ${deleted}`);
     } catch (error) {

@@ -17,24 +17,56 @@ export function getCalendar(calendarId: string): Calendar {
 }
 
 /**
+ * メタデータから origin 情報を抽出
+ * origin* 3 フィールドが揃っていればそれを採用、無ければ source* を origin 扱い（後方互換）
+ */
+export function getOriginFromMetadata(md: BlockMetadata): {
+  calendarId: string;
+  eventId: string;
+  startTime: string;
+} {
+  if (md.originCalendarId && md.originEventId && md.originStartTime) {
+    return {
+      calendarId: md.originCalendarId,
+      eventId: md.originEventId,
+      startTime: md.originStartTime,
+    };
+  }
+  return {
+    calendarId: md.sourceCalendarId,
+    eventId: md.sourceEventId,
+    startTime: md.sourceStartTime,
+  };
+}
+
+/**
  * ブロック対象のイベントを取得
- * - 自動ブロックイベントは除外
- * - 出欠ステータスでフィルタリング
+ * - 内部系統の自動ブロックは除外（direct source ベース、無限ループ防止）
+ * - 外部系統の自動ブロックは出欠フィルタを bypass して伝搬対象に
+ * - 通常イベントは出欠ステータスでフィルタリング
  */
 export function getBlockableEvents(
   calendar: Calendar,
   start: Date,
   end: Date,
-  blockingStatuses: GuestStatus[]
+  blockingStatuses: GuestStatus[],
+  internalCalendarIds: string[]
 ): BlockCandidate[] {
   const events = calendar.getEvents(start, end);
   const calendarId = calendar.getId();
 
   return events
     .filter((event) => {
-      // 自動ブロックイベントは除外
-      if (isAutoBlockEvent(event)) return false;
-      // 除外プレフィックスで始まるイベントは除外
+      // 1. 内部系統の自動ブロックは除外（無限ループ防止）
+      if (isInternalAutoBlockEvent(event, internalCalendarIds)) return false;
+      // 2. 外部系統の自動ブロック（metadataあり、ここまでで内部除外済み）は即 candidate 化
+      //    別アカウント実行時 getMyStatus() が想定値にならないため出欠フィルタを bypass
+      //    prefix/EventType/transparency も bypass: 自動ブロックは生成形式が一定で安全
+      const md = parseBlockMetadata(event);
+      if (md !== null) {
+        return true;
+      }
+      // 3. 通常イベント: 除外プレフィックスで始まるイベントは除外
       if (EXCLUDED_PREFIXES.some((prefix) => event.getTitle().startsWith(prefix))) return false;
       // EventType==DEFAULTのみ対象（Tasks等を除外）
       // @types/google-apps-scriptにgetEventTypeが未定義のため型アサーション使用
@@ -46,30 +78,53 @@ export function getBlockableEvents(
       const transparency = (event as unknown as { getTransparency: () => unknown }).getTransparency();
       const transparentType = (CalendarApp as unknown as { EventTransparency: { TRANSPARENT: unknown } }).EventTransparency.TRANSPARENT;
       if (transparency === transparentType) return false;
-      // 出欠ステータスでフィルタ
+      // 4. 出欠ステータスでフィルタ
       const status = event.getMyStatus();
       return blockingStatuses.includes(status);
     })
-    .map((event) => ({
-      sourceCalendarId: calendarId,
-      sourceEventId: event.getId(),
-      sourceStartTime: new Date(event.getStartTime().getTime()),
-      sourceEndTime: new Date(event.getEndTime().getTime()),
-      isAllDay: event.isAllDayEvent(),
-    }));
+    .map((event) => {
+      const md = parseBlockMetadata(event);
+      let origin: { calendarId: string; eventId: string; startTime: Date };
+      if (md) {
+        // 外部系統の自動ブロック: 元のorigin情報を引き継ぐ
+        const o = getOriginFromMetadata(md);
+        origin = {
+          calendarId: o.calendarId,
+          eventId: o.eventId,
+          startTime: new Date(o.startTime),
+        };
+      } else {
+        // 通常イベント: 自身がorigin
+        origin = {
+          calendarId,
+          eventId: event.getId(),
+          startTime: new Date(event.getStartTime().getTime()),
+        };
+      }
+      return {
+        sourceCalendarId: calendarId,
+        sourceEventId: event.getId(),
+        sourceStartTime: new Date(event.getStartTime().getTime()),
+        sourceEndTime: new Date(event.getEndTime().getTime()),
+        isAllDay: event.isAllDayEvent(),
+        originCalendarId: origin.calendarId,
+        originEventId: origin.eventId,
+        originStartTime: origin.startTime,
+      };
+    });
 }
 
 /**
- * 自動ブロックイベントかどうかを判定
+ * 自スクリプトの CALENDAR_IDS 内で生成された自動ブロックか判定
+ * direct source ベース: origin ベースだと D→B→A→B... の経路でループ入口になるため
  */
-function isAutoBlockEvent(event: CalendarEvent): boolean {
-  const description = event.getDescription() || '';
-  try {
-    const metadata = JSON.parse(description) as Partial<BlockMetadata>;
-    return metadata.isAutoBlock === true;
-  } catch {
-    return false;
-  }
+function isInternalAutoBlockEvent(
+  event: CalendarEvent,
+  internalCalendarIds: string[]
+): boolean {
+  const md = parseBlockMetadata(event);
+  if (!md) return false;
+  return internalCalendarIds.includes(md.sourceCalendarId);
 }
 
 /**
@@ -97,6 +152,7 @@ export function parseBlockMetadata(
 
 /**
  * ブロックイベントを作成
+ * metadata には direct source と origin の両方を記録
  */
 export function createBlockEvent(
   targetCalendar: Calendar,
@@ -107,6 +163,9 @@ export function createBlockEvent(
     sourceCalendarId: candidate.sourceCalendarId,
     sourceEventId: candidate.sourceEventId,
     sourceStartTime: candidate.sourceStartTime.toISOString(),
+    originCalendarId: candidate.originCalendarId,
+    originEventId: candidate.originEventId,
+    originStartTime: candidate.originStartTime.toISOString(),
     createdAt: new Date().toISOString(),
   };
 
@@ -135,28 +194,32 @@ export function createBlockEvent(
 
 /**
  * 既存のブロックイベントを検索
- * キー: sourceCalendarId|sourceEventId|sourceStartTime
+ * キー: originCalendarId|originEventId|originStartTime（後方互換: origin未定義時はsourceで代用）
+ * 値は配列: 同一originキーで重複ブロックが存在する場合（過去のバグ・手動編集起因）の取りこぼし防止
  */
 export function findExistingBlockEvents(
   calendar: Calendar,
   start: Date,
   end: Date
-): Map<string, CalendarEvent> {
+): Map<string, CalendarEvent[]> {
   const events = calendar.getEvents(start, end);
-  const blockEvents = new Map<string, CalendarEvent>();
+  const blockEvents = new Map<string, CalendarEvent[]>();
 
   for (const event of events) {
     const metadata = parseBlockMetadata(event);
     if (metadata) {
-      const key = buildBlockKey(
-        metadata.sourceCalendarId,
-        metadata.sourceEventId,
-        metadata.sourceStartTime
-      );
-      blockEvents.set(key, event);
+      const o = getOriginFromMetadata(metadata);
+      const key = buildBlockKey(o.calendarId, o.eventId, o.startTime);
+      const arr = blockEvents.get(key) ?? [];
+      arr.push(event);
+      blockEvents.set(key, arr);
     }
   }
-
+  for (const [key, arr] of blockEvents) {
+    if (arr.length > 1) {
+      console.warn(`Duplicate block events detected for key=${key}: count=${arr.length}`);
+    }
+  }
   return blockEvents;
 }
 
