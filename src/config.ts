@@ -3,6 +3,9 @@ import { CalendarConfig, SyncPeriod } from './types';
 /** ブロックイベントのタイトル */
 export const BLOCK_TITLE = '予定あり(自動ブロック)';
 
+/** ブロック対象から除外するイベントタイトルのプレフィックス */
+export const EXCLUDED_PREFIXES = ['[TASK]', '⏳', '✅', '❌'];
+
 /** 同期対象期間（月数） */
 const SYNC_MONTHS = 1;
 
