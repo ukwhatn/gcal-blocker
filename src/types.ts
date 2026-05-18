@@ -43,7 +43,6 @@ export interface SyncResult {
  */
 export interface CalendarConfig {
   calendarIds: string[];
-  blockingStatuses: GoogleAppsScript.Calendar.GuestStatus[];
 }
 
 /**

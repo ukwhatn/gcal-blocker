@@ -3,7 +3,6 @@ import { BLOCK_TITLE, EXCLUDED_PREFIXES } from './config';
 
 type Calendar = GoogleAppsScript.Calendar.Calendar;
 type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
-type GuestStatus = GoogleAppsScript.Calendar.GuestStatus;
 
 /**
  * カレンダーIDからカレンダーを取得
@@ -43,13 +42,12 @@ export function getOriginFromMetadata(md: BlockMetadata): {
  * ブロック対象のイベントを取得
  * - 内部系統の自動ブロックは除外（direct source ベース、無限ループ防止）
  * - 外部系統の自動ブロックは出欠フィルタを bypass して伝搬対象に
- * - 通常イベントは出欠ステータスでフィルタリング
+ * - 通常イベントは「明示的に NO」のみ除外（別アカウント実行時 getMyStatus が null になる対応）
  */
 export function getBlockableEvents(
   calendar: Calendar,
   start: Date,
   end: Date,
-  blockingStatuses: GuestStatus[],
   internalCalendarIds: string[]
 ): BlockCandidate[] {
   const events = calendar.getEvents(start, end);
@@ -78,9 +76,12 @@ export function getBlockableEvents(
       const transparency = (event as unknown as { getTransparency: () => unknown }).getTransparency();
       const transparentType = (CalendarApp as unknown as { EventTransparency: { TRANSPARENT: unknown } }).EventTransparency.TRANSPARENT;
       if (transparency === transparentType) return false;
-      // 4. 出欠ステータスでフィルタ
+      // 4. 出欠フィルタ: 明示的に NO の場合のみ除外
+      //    別アカウント実行時 getMyStatus() が null を返すケースがあり（例: ゲストなしで他人 owner のイベント）、
+      //    厳密フィルタだと通常イベントが伝搬されないため緩和
       const status = event.getMyStatus();
-      return blockingStatuses.includes(status);
+      if (status === CalendarApp.GuestStatus.NO) return false;
+      return true;
     })
     .map((event) => {
       const md = parseBlockMetadata(event);
