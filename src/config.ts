@@ -36,12 +36,6 @@ export function getConfig(): CalendarConfig {
 
   return {
     calendarIds,
-    blockingStatuses: [
-      CalendarApp.GuestStatus.YES,
-      CalendarApp.GuestStatus.MAYBE,
-      CalendarApp.GuestStatus.INVITED,
-      CalendarApp.GuestStatus.OWNER,
-    ],
   };
 }
 

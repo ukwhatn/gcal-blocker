@@ -35,7 +35,6 @@ export function syncCalendarPair(
     sourceCalendar,
     period.start,
     period.end,
-    config.blockingStatuses,
     config.calendarIds
   );
   console.log(`  ソースイベント数: ${blockCandidates.length}`);
