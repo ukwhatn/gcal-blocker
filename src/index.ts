@@ -86,20 +86,6 @@ function removeTriggerByName(handlerName: string): void {
   }
 }
 
-// --- 互換 wrapper（既存トリガが残存していてもエラーにならないため）---
-
-export function syncCalendars(): void {
-  syncCalendarsMain();
-}
-
-export function setupTrigger(): void {
-  setupTriggerMain();
-}
-
-export function removeTrigger(): void {
-  removeTriggerMain();
-}
-
 // --- 共通（プロジェクトの CALENDAR_IDS を読んで動作）---
 
 /**

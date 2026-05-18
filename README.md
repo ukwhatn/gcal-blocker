@@ -103,13 +103,13 @@ bun run deploy:satellite
 
 旧 `syncCalendars` トリガで運用していた場合の手順:
 
-1. ローカルで最新コードを pull
-2. `bun run deploy:main` を実行
-3. GAS エディタで `setupTriggerMain()` を 1 回手動実行
-   - 旧 `syncCalendars` トリガが自動削除され、新 `syncCalendarsMain` トリガが登録される
-4. `syncCalendarsMain()` を手動実行して動作確認
+**CRITICAL**: 旧関数（`syncCalendars` / `setupTrigger` / `removeTrigger`）は本バージョンで削除済み。旧トリガが残ったままデプロイすると、トリガ実行時に「関数が見つからない」エラーが発生する。デプロイ前に旧トリガを削除すること。
 
-旧関数（`syncCalendars` / `setupTrigger` / `removeTrigger`）は互換 wrapper として残っているため、移行中のトリガ残存でもエラーにならない。
+1. GAS エディタを開き、左メニュー「トリガー」から **旧 `syncCalendars` トリガを手動削除**
+2. ローカルで最新コードを pull
+3. `bun run deploy:main` を実行
+4. GAS エディタで `setupTriggerMain()` を 1 回手動実行（新 `syncCalendarsMain` トリガが登録される）
+5. `syncCalendarsMain()` を手動実行して動作確認
 
 ## グローバル関数一覧
 
@@ -119,10 +119,9 @@ bun run deploy:satellite
 | `syncCalendarsSatellite()` | サテライト用同期（トリガ登録ハンドラ） |
 | `setupTriggerMain()` | メイン用 15 分トリガを登録（全ロールトリガ削除後） |
 | `setupTriggerSatellite()` | サテライト用 15 分トリガを登録（全ロールトリガ削除後） |
-| `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除 |
+| `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除（旧 `syncCalendars` トリガ含む） |
 | `clearAllBlocks()` | 自スクリプト管理の全自動ブロック削除 |
 | `clearOutOfRangeBlocks()` | 同期対象期間外（SYNC_MONTHS 縮小時の孤児）の自動ブロック削除 |
-| `syncCalendars()` / `setupTrigger()` / `removeTrigger()` | 旧名互換 wrapper |
 
 ## 設定（src/config.ts）
 

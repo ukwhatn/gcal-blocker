@@ -74,10 +74,9 @@ src/
 | `syncCalendarsSatellite()` | サテライト用同期（トリガ登録ハンドラ） |
 | `setupTriggerMain()` | メイン用 15分トリガを登録（全ロールトリガ削除後） |
 | `setupTriggerSatellite()` | サテライト用 15分トリガを登録（全ロールトリガ削除後） |
-| `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除 |
+| `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除（旧 `syncCalendars` トリガ含む） |
 | `clearAllBlocks()` | 自スクリプト管理の全自動ブロック削除（他プロジェクト管理は保護） |
 | `clearOutOfRangeBlocks()` | 同期対象期間外の孤児ブロック削除 |
-| `syncCalendars()` / `setupTrigger()` / `removeTrigger()` | 旧名互換 wrapper（既存トリガ救済用） |
 
 ### メタデータ設計
 
