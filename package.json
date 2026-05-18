@@ -6,8 +6,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "push": "clasp push --force",
-    "deploy": "bun run build && clasp push --force"
+    "deploy:main": "cp .clasp-main.json .clasp.json && bun run build && clasp push --force",
+    "deploy:satellite": "cp .clasp-satellite.json .clasp.json && bun run build && clasp push --force"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
