@@ -35,6 +35,8 @@ export interface BlockCandidate {
 export interface SyncResult {
   created: number;
   deleted: number;
+  privatized: number; // 既存ブロックを非公開化した件数
+  freed: number; // 除外prefixイベントを「予定なし」化した件数
   errors: string[];
 }
 

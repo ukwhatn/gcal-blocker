@@ -31,7 +31,7 @@ function runSyncWithLog(role: string): void {
   try {
     const result = runSync();
     console.log(
-      `Sync completed (role=${role}): created=${result.created}, deleted=${result.deleted}, errors=${result.errors.length}`
+      `Sync completed (role=${role}): created=${result.created}, deleted=${result.deleted}, privatized=${result.privatized}, freed=${result.freed}, errors=${result.errors.length}`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

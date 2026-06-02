@@ -1,6 +1,7 @@
 import { SyncResult } from './types';
 import { getConfig, getSyncPeriod } from './config';
 import { syncCalendarPair, clearBlockEvents } from './block-manager';
+import { getCalendar, makeExcludedEventsTransparent } from './calendar-service';
 
 /**
  * 全カレンダー間の同期を実行
@@ -17,6 +18,8 @@ export function runSync(): SyncResult {
   const result: SyncResult = {
     created: 0,
     deleted: 0,
+    privatized: 0,
+    freed: 0,
     errors: [],
   };
 
@@ -31,7 +34,9 @@ export function runSync(): SyncResult {
         const pairResult = syncCalendarPair(sourceId, targetId, config, period);
         result.created += pairResult.created;
         result.deleted += pairResult.deleted;
-        console.log(`  結果: created=${pairResult.created}, deleted=${pairResult.deleted}`);
+        result.privatized += pairResult.privatized;
+        result.errors.push(...pairResult.errors);
+        console.log(`  結果: created=${pairResult.created}, deleted=${pairResult.deleted}, privatized=${pairResult.privatized}, errors=${pairResult.errors.length}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         result.errors.push(`${sourceId} -> ${targetId}: ${message}`);
@@ -40,8 +45,26 @@ export function runSync(): SyncResult {
     }
   }
 
+  // 除外prefixイベントの「予定なし」化（カレンダー単位で1回ずつ）
+  for (const calendarId of config.calendarIds) {
+    console.log(`--- 予定なし化チェック: ${calendarId} ---`);
+    try {
+      const freed = makeExcludedEventsTransparent(
+        getCalendar(calendarId),
+        period.start,
+        period.end
+      );
+      result.freed += freed;
+      console.log(`  予定なし化: ${freed}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result.errors.push(`makeTransparent ${calendarId}: ${message}`);
+      console.error(`  エラー: ${message}`);
+    }
+  }
+
   console.log('=== 同期完了 ===');
-  console.log(`合計: created=${result.created}, deleted=${result.deleted}, errors=${result.errors.length}`);
+  console.log(`合計: created=${result.created}, deleted=${result.deleted}, privatized=${result.privatized}, freed=${result.freed}, errors=${result.errors.length}`);
 
   return result;
 }

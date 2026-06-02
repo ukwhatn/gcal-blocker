@@ -4,6 +4,7 @@ import {
   getBlockableEvents,
   findExistingBlockEvents,
   createBlockEvent,
+  ensureEventPrivate,
   buildBlockKey,
   parseBlockMetadata,
 } from './calendar-service';
@@ -13,6 +14,8 @@ type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
 interface PairSyncResult {
   created: number;
   deleted: number;
+  privatized: number;
+  errors: string[];
 }
 
 /**
@@ -60,6 +63,8 @@ export function syncCalendarPair(
 
   let created = 0;
   let deleted = 0;
+  let privatized = 0;
+  const errors: string[] = [];
 
   // 作成: existingBlocks 全体で重複検知（origin key 一意性）
   const candidateKeys = new Set<string>();
@@ -73,8 +78,34 @@ export function syncCalendarPair(
 
     if (!existingBlocks.has(key)) {
       console.log(`  作成: ${candidate.sourceStartTime.toISOString()} (${candidate.isAllDay ? '終日' : '時間指定'}, origin=${candidate.originCalendarId})`);
-      createBlockEvent(targetCalendar, candidate);
-      created++;
+      // 非公開ブロック作成に成功した場合のみ加算（失敗時は作成イベント削除済み・次回再試行）
+      if (createBlockEvent(targetCalendar, candidate)) {
+        created++;
+      } else {
+        // 非公開化失敗でブロックは未作成（公開ブロックは残さない）。検知のため errors に記録
+        errors.push(
+          `block not created (visibility failed) on ${targetCalendarId} @ ${candidate.sourceStartTime.toISOString()}`
+        );
+      }
+    }
+  }
+
+  // 既存ブロックの是正: 自source の relevantBlocks が非公開でなければ非公開化
+  for (const [, events] of relevantBlocks) {
+    for (const event of events) {
+      try {
+        if (ensureEventPrivate(event)) {
+          console.log(`  非公開化: ${event.getStartTime().toISOString()}`);
+          privatized++;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`  既存ブロックの非公開化に失敗: ${message}`);
+        // 公開ブロックが残存し得るため検知用に記録
+        errors.push(
+          `ensureEventPrivate failed on ${targetCalendarId} @ ${event.getStartTime().toISOString()}: ${message}`
+        );
+      }
     }
   }
 
@@ -89,7 +120,7 @@ export function syncCalendarPair(
     }
   }
 
-  return { created, deleted };
+  return { created, deleted, privatized, errors };
 }
 
 /**
