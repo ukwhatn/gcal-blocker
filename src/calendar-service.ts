@@ -67,15 +67,9 @@ export function getBlockableEvents(
       // 3. 通常イベント: 除外プレフィックスで始まるイベントは除外
       if (EXCLUDED_PREFIXES.some((prefix) => event.getTitle().startsWith(prefix))) return false;
       // EventType==DEFAULTのみ対象（Tasks等を除外）
-      // @types/google-apps-scriptにgetEventTypeが未定義のため型アサーション使用
-      const eventType = (event as unknown as { getEventType: () => unknown }).getEventType();
-      const defaultType = (CalendarApp as unknown as { EventType: { DEFAULT: unknown } }).EventType.DEFAULT;
-      if (eventType !== defaultType) return false;
+      if (!isDefaultEventType(event)) return false;
       // 「予定なし」（transparent）のイベントは除外
-      // @types/google-apps-scriptにgetTransparency/EventTransparencyが未定義のため型アサーション使用
-      const transparency = (event as unknown as { getTransparency: () => unknown }).getTransparency();
-      const transparentType = (CalendarApp as unknown as { EventTransparency: { TRANSPARENT: unknown } }).EventTransparency.TRANSPARENT;
-      if (transparency === transparentType) return false;
+      if (getEventTransparency(event) === eventTransparency('TRANSPARENT')) return false;
       // 4. 出欠フィルタ: 明示的に NO の場合のみ除外
       //    別アカウント実行時 getMyStatus() が null を返すケースがあり（例: ゲストなしで他人 owner のイベント）、
       //    厳密フィルタだと通常イベントが伝搬されないため緩和
@@ -154,11 +148,15 @@ export function parseBlockMetadata(
 /**
  * ブロックイベントを作成
  * metadata には direct source と origin の両方を記録
+ * 公開設定は「非公開(PRIVATE)」で作成する。
+ * setVisibility が失敗した場合は公開ブロックを残さないよう作成イベントを削除し false を返す
+ * （加算は呼び出し側で戻り値が true のときのみ行う。次回 sync で再試行される）
+ * @returns 非公開ブロックの作成に成功した場合 true
  */
 export function createBlockEvent(
   targetCalendar: Calendar,
   candidate: BlockCandidate
-): void {
+): boolean {
   const metadata: BlockMetadata = {
     isAutoBlock: true,
     sourceCalendarId: candidate.sourceCalendarId,
@@ -174,23 +172,85 @@ export function createBlockEvent(
     description: JSON.stringify(metadata),
   };
 
-  if (candidate.isAllDay) {
-    // 終日イベント: 開始日と終了日を指定
-    targetCalendar.createAllDayEvent(
-      BLOCK_TITLE,
-      candidate.sourceStartTime,
-      candidate.sourceEndTime,
-      options
-    );
-  } else {
-    // 通常イベント: 開始時刻と終了時刻を指定
-    targetCalendar.createEvent(
-      BLOCK_TITLE,
-      candidate.sourceStartTime,
-      candidate.sourceEndTime,
-      options
-    );
+  const event = candidate.isAllDay
+    ? // 終日イベント: 開始日と終了日を指定
+      targetCalendar.createAllDayEvent(
+        BLOCK_TITLE,
+        candidate.sourceStartTime,
+        candidate.sourceEndTime,
+        options
+      )
+    : // 通常イベント: 開始時刻と終了時刻を指定
+      targetCalendar.createEvent(
+        BLOCK_TITLE,
+        candidate.sourceStartTime,
+        candidate.sourceEndTime,
+        options
+      );
+
+  try {
+    event.setVisibility(CalendarApp.Visibility.PRIVATE);
+  } catch (error) {
+    // 非公開化に失敗した場合、公開状態のブロックを残さないよう作成イベントを削除する
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`  非公開化に失敗したためブロックを削除: ${message}`);
+    try {
+      event.deleteEvent();
+    } catch {
+      // 削除も失敗した場合は是正できない（次回 sync の ensureEventPrivate で再是正を試みる）
+    }
+    return false;
   }
+  return true;
+}
+
+/**
+ * イベントが非公開(PRIVATE)でなければ非公開化する
+ * @returns 非公開化した場合 true（既に非公開なら false）
+ */
+export function ensureEventPrivate(event: CalendarEvent): boolean {
+  if (event.getVisibility() !== CalendarApp.Visibility.PRIVATE) {
+    event.setVisibility(CalendarApp.Visibility.PRIVATE);
+    return true;
+  }
+  return false;
+}
+
+/**
+ * 除外プレフィックス（EXCLUDED_PREFIXES）で始まる通常イベントが
+ * 「予定あり(OPAQUE)」なら「予定なし(TRANSPARENT)」化する。
+ * 自動ブロックイベント（metadataあり）は対象外。
+ * イベント単位で例外を握り、1件の失敗で残りを止めない。
+ * @returns 予定なし化した件数
+ */
+export function makeExcludedEventsTransparent(
+  calendar: Calendar,
+  start: Date,
+  end: Date
+): number {
+  const events = calendar.getEvents(start, end);
+  let freed = 0;
+
+  for (const event of events) {
+    try {
+      // 自動ブロックは対象外（予定なし化しない）
+      if (parseBlockMetadata(event) !== null) continue;
+      const title = event.getTitle();
+      if (!EXCLUDED_PREFIXES.some((prefix) => title.startsWith(prefix))) continue;
+      // EventType==DEFAULTのみ対象（Tasks/誕生日等の特殊イベントを除外）
+      if (!isDefaultEventType(event)) continue;
+      // 既に「予定なし」のものはスキップ
+      if (getEventTransparency(event) !== eventTransparency('OPAQUE')) continue;
+      setEventTransparency(event, 'TRANSPARENT');
+      console.log(`  予定なし化: ${title} @ ${event.getStartTime().toISOString()}`);
+      freed++;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`  予定なし化に失敗: ${message}`);
+    }
+  }
+
+  return freed;
 }
 
 /**
@@ -233,4 +293,37 @@ export function buildBlockKey(
   sourceStartTime: string
 ): string {
   return `${sourceCalendarId}|${sourceEventId}|${sourceStartTime}`;
+}
+
+/**
+ * EventType が DEFAULT（通常イベント）か判定
+ * Tasks・誕生日等の特殊イベントを除外するためのガード
+ */
+function isDefaultEventType(event: CalendarEvent): boolean {
+  // @types/google-apps-script に getEventType/EventType が未定義のため型アサーション使用
+  const eventType = (event as unknown as { getEventType: () => unknown }).getEventType();
+  const defaultType = (CalendarApp as unknown as { EventType: { DEFAULT: unknown } }).EventType
+    .DEFAULT;
+  return eventType === defaultType;
+}
+
+// --- transparency ヘルパー ---
+// @types/google-apps-script に getTransparency/setTransparency/EventTransparency が
+// 未定義のため、型アサーションをここに集約する
+type TransparencyKey = 'OPAQUE' | 'TRANSPARENT';
+
+function getEventTransparency(event: CalendarEvent): unknown {
+  return (event as unknown as { getTransparency: () => unknown }).getTransparency();
+}
+
+function eventTransparency(key: TransparencyKey): unknown {
+  return (
+    CalendarApp as unknown as { EventTransparency: Record<TransparencyKey, unknown> }
+  ).EventTransparency[key];
+}
+
+function setEventTransparency(event: CalendarEvent, key: TransparencyKey): void {
+  (event as unknown as { setTransparency: (t: unknown) => void }).setTransparency(
+    eventTransparency(key)
+  );
 }
