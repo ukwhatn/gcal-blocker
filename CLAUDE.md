@@ -3,6 +3,7 @@
 ## 概要
 
 Google Calendar の複数カレンダー間でブロックイベントを相互に同期するGAS。
+加えて、全プロジェクト共通の 1 カレンダーへ予定の中身をコピーする機能を持つ。
 TypeScript + webpack + clasp によるモダンな GAS 開発環境で構築。
 
 ## 技術スタック
@@ -58,11 +59,13 @@ bun run deploy:satellite
 
 ```
 src/
-├── types.ts             # BlockMetadata/BlockCandidate/SyncResult/CalendarConfig 型定義
-├── config.ts            # スクリプトプロパティ読み込み、同期期間
+├── types.ts             # BlockMetadata/BlockCandidate/CopyCandidate/SyncResult 等の型定義
+├── config.ts            # スクリプトプロパティ読み込み、同期期間、ラベル導出
 ├── calendar-service.ts  # CalendarApp 操作、外部系統判定、origin引き継ぎ
 ├── block-manager.ts     # カレンダーペア間の差分検出・適用、clear
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
+├── copy-service.ts      # Calendar API v3 操作、コピー対象判定、コピー内容の組み立て
+├── copy-engine.ts       # コピーの作成/更新/削除のオーケストレーション
 └── index.ts             # グローバル関数エクスポート
 ```
 
@@ -77,6 +80,29 @@ src/
 | `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除（旧 `syncCalendars` トリガ含む） |
 | `clearAllBlocks()` | 自スクリプト管理の全自動ブロック削除（他プロジェクト管理は保護） |
 | `clearOutOfRangeBlocks()` | 同期対象期間外の孤児ブロック削除 |
+| `copyEvents()` | 共通カレンダーへのイベントコピー（トリガ登録ハンドラ） |
+| `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15分トリガの登録・削除（sync トリガとは独立） |
+| `clearAllCopies()` | 自プロジェクト担当のコピーを全削除（他プロジェクト担当は保護） |
+| `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピー削除 |
+
+## イベントコピー機能
+
+全プロジェクト共通の 1 カレンダーへ、担当カレンダーの予定をタイトル・description・ゲスト・Meet URL つきでコピーする。ブロック同期とは独立したトリガ（`copyEvents`）で動く。
+
+- **Calendar API v3（Advanced Calendar Service）が必須**。Meet URL の取得・所有者の出欠判定・`extendedProperties.private` への不可視メタデータ格納がこれに依存する。`dist/appsscript.json` の `enabledAdvancedServices` で有効化し、各プロジェクトで再認可が必要
+- **担当分離**: コピー元は `CALENDAR_IDS` ではなく `COPY_SOURCE_IDS` で明示する。ブリッジカレンダーは複数プロジェクトの `CALENDAR_IDS` に含まれるため、流用すると二重コピーと振動が起きる
+- **削除責任分離**: 作成・更新・削除はすべて自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみが対象
+- コピー先カレンダーは `CALENDAR_IDS` に含めてはならない（`getCopyConfig()` が検証してエラーにする）
+- ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
+- 更新は `Event.updated` と保存済み `sourceUpdated` の比較で差分 patch
+
+### スクリプトプロパティ
+
+| キー | 役割 |
+|------|------|
+| `COPY_TARGET_CALENDAR_ID` | コピー先の共通カレンダー ID（全プロジェクト同値） |
+| `COPY_SOURCE_IDS` | 自プロジェクトが担当するコピー元（カンマ区切り） |
+| `CALENDAR_LABELS` | `<calendarId>:<LABEL>[:<colorId>]` をカンマ区切り。未設定時はドメインからラベルを導出 |
 
 ### メタデータ設計
 
@@ -119,6 +145,13 @@ src/
 6. GAS エディタでスクリプトプロパティ `CALENDAR_IDS=<CalB の ID>,<CalD の ID>` を設定
 7. `setupTriggerSatellite()` を 1 回手動実行
 8. `syncCalendarsSatellite()` を手動実行して動作確認（ログで `role=satellite` 確認）
+
+### イベントコピー（全プロジェクト共通）
+1. コピー先カレンダーを作成し、他プロジェクトの実行アカウントに「予定の表示と変更」権限で共有
+2. スクリプトプロパティ `COPY_TARGET_CALENDAR_ID` / `COPY_SOURCE_IDS` / `CALENDAR_LABELS` を設定
+3. `bun run deploy:*` で Advanced Calendar Service 入りのマニフェストを push
+4. `copyEvents()` を 1 回手動実行して Advanced Service の認可を通し、ログで created 件数を確認
+5. `setupCopyTrigger()` を 1 回手動実行
 
 ## ブランチ
 
