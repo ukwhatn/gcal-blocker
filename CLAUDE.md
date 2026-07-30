@@ -121,6 +121,7 @@ src/
 }
 ```
 
+- 読み取りは 1 カレンダー 1 回（`readCalendarSnapshot`）。ペアごとに読み直さず、作成・削除でターゲットの索引を更新しながらメモリ上で差分を解く
 - 内部系統判定: `direct sourceCalendarId ∈ 自スクリプトの CALENDAR_IDS` なら除外（無限ループ防止）
 - キー生成: origin ベース（A→B 直接と A→B→D 経由が同じキーで重複検知）
 - 削除責任分離: 各 sync ペアは `direct source` 一致のブロックのみ削除
