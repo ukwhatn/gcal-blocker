@@ -7,7 +7,7 @@ export const BLOCK_TITLE = '予定あり(自動ブロック)';
 export const EXCLUDED_PREFIXES = ['[TASK]', '⏳', '✅', '❌'];
 
 /** ブロック同期の対象期間（月数） */
-const SYNC_MONTHS = 1;
+const SYNC_MONTHS = 3;
 
 /** コピーの対象期間（月数） */
 const COPY_MONTHS = 12;
