@@ -1,7 +1,24 @@
-import { SyncResult } from './types';
+import { BlockCandidate, SyncResult } from './types';
 import { getConfig, getSyncPeriod } from './config';
 import { syncCalendarPair, clearBlockEvents } from './block-manager';
-import { getCalendar, makeExcludedEventsTransparent } from './calendar-service';
+import {
+  CalendarSnapshot,
+  findExistingBlockEvents,
+  getBlockableEvents,
+  makeExcludedEventsTransparent,
+  readCalendarSnapshot,
+} from './calendar-service';
+
+type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
+
+/**
+ * 1 カレンダーにつき 1 回の読み取りから作った、同期に必要な材料
+ */
+interface CalendarState {
+  snapshot: CalendarSnapshot;
+  candidates: BlockCandidate[];
+  blocks: Map<string, CalendarEvent[]>;
+}
 
 /**
  * 全カレンダー間の同期を実行
@@ -24,15 +41,43 @@ export function runSync(): SyncResult {
     errors: [],
   };
 
+  // 各カレンダーを 1 回だけ読み、ペアの差分はメモリ上で解く
+  const states = new Map<string, CalendarState>();
+  for (const calendarId of config.calendarIds) {
+    try {
+      const snapshot = readCalendarSnapshot(calendarId, period);
+      states.set(calendarId, {
+        snapshot,
+        candidates: getBlockableEvents(snapshot, config.calendarIds),
+        blocks: findExistingBlockEvents(snapshot),
+      });
+      console.log(`読み取り: ${calendarId} (events=${snapshot.events.length})`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      result.errors.push(`read ${calendarId}: ${message}`);
+      console.error(`読み取りエラー: ${calendarId}: ${message}`);
+    }
+  }
+
   // 各カレンダーから他の全カレンダーへブロック
   for (const sourceId of config.calendarIds) {
     for (const targetId of config.calendarIds) {
       if (sourceId === targetId) continue;
 
+      const source = states.get(sourceId);
+      const target = states.get(targetId);
+      // 読み取りに失敗したカレンダーが絡むペアは、誤削除を避けるため丸ごと skip する
+      if (!source || !target) continue;
+
       console.log(`--- ${sourceId} -> ${targetId} ---`);
 
       try {
-        const pairResult = syncCalendarPair(sourceId, targetId, config, period);
+        const pairResult = syncCalendarPair(
+          sourceId,
+          source.candidates,
+          target.snapshot,
+          target.blocks
+        );
         result.created += pairResult.created;
         result.deleted += pairResult.deleted;
         result.privatized += pairResult.privatized;
@@ -48,14 +93,10 @@ export function runSync(): SyncResult {
   }
 
   // 除外prefixイベントの「予定なし」化（カレンダー単位で1回ずつ）
-  for (const calendarId of config.calendarIds) {
+  for (const [calendarId, state] of states) {
     console.log(`--- 予定なし化チェック: ${calendarId} ---`);
     try {
-      const freed = makeExcludedEventsTransparent(
-        getCalendar(calendarId),
-        period.start,
-        period.end
-      );
+      const freed = makeExcludedEventsTransparent(state.snapshot);
       result.freed += freed;
       console.log(`  予定なし化: ${freed}`);
     } catch (error) {

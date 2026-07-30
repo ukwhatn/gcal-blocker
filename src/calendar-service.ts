@@ -1,8 +1,18 @@
-import { BlockMetadata, BlockCandidate } from './types';
+import { BlockMetadata, BlockCandidate, SyncPeriod } from './types';
 import { BLOCK_TITLE, EXCLUDED_PREFIXES } from './config';
 
 type Calendar = GoogleAppsScript.Calendar.Calendar;
 type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
+
+/**
+ * 1 回の読み取りで取得したカレンダーの状態
+ * ブロック候補の抽出・既存ブロックの索引化・予定なし化がすべてこれを共有する
+ */
+export interface CalendarSnapshot {
+  calendarId: string;
+  calendar: Calendar;
+  events: CalendarEvent[];
+}
 
 /**
  * カレンダーIDからカレンダーを取得
@@ -13,6 +23,18 @@ export function getCalendar(calendarId: string): Calendar {
     throw new Error(`Calendar not found: ${calendarId}`);
   }
   return calendar;
+}
+
+/**
+ * カレンダーの対象期間のイベントを 1 回だけ読み取る
+ */
+export function readCalendarSnapshot(calendarId: string, period: SyncPeriod): CalendarSnapshot {
+  const calendar = getCalendar(calendarId);
+  return {
+    calendarId,
+    calendar,
+    events: calendar.getEvents(period.start, period.end),
+  };
 }
 
 /**
@@ -45,15 +67,12 @@ export function getOriginFromMetadata(md: BlockMetadata): {
  * - 通常イベントは「明示的に NO」のみ除外（別アカウント実行時 getMyStatus が null になる対応）
  */
 export function getBlockableEvents(
-  calendar: Calendar,
-  start: Date,
-  end: Date,
+  snapshot: CalendarSnapshot,
   internalCalendarIds: string[]
 ): BlockCandidate[] {
-  const events = calendar.getEvents(start, end);
-  const calendarId = calendar.getId();
+  const calendarId = snapshot.calendarId;
 
-  return events
+  return snapshot.events
     .filter((event) => {
       // 1. 内部系統の自動ブロックは除外（無限ループ防止）
       if (isInternalAutoBlockEvent(event, internalCalendarIds)) return false;
@@ -158,14 +177,14 @@ export function parseBlockMetadataFromDescription(
  * ブロックイベントを作成
  * metadata には direct source と origin の両方を記録
  * 公開設定は「非公開(PRIVATE)」で作成する。
- * setVisibility が失敗した場合は公開ブロックを残さないよう作成イベントを削除し false を返す
- * （加算は呼び出し側で戻り値が true のときのみ行う。次回 sync で再試行される）
- * @returns 非公開ブロックの作成に成功した場合 true
+ * setVisibility が失敗した場合は公開ブロックを残さないよう作成イベントを削除し null を返す
+ * （加算は呼び出し側で戻り値が非 null のときのみ行う。次回 sync で再試行される）
+ * @returns 作成した非公開ブロック。非公開化に失敗した場合は null
  */
 export function createBlockEvent(
   targetCalendar: Calendar,
   candidate: BlockCandidate
-): boolean {
+): CalendarEvent | null {
   const metadata: BlockMetadata = {
     isAutoBlock: true,
     sourceCalendarId: candidate.sourceCalendarId,
@@ -208,9 +227,9 @@ export function createBlockEvent(
     } catch {
       // 削除も失敗した場合は是正できない（次回 sync の ensureEventPrivate で再是正を試みる）
     }
-    return false;
+    return null;
   }
-  return true;
+  return event;
 }
 
 /**
@@ -259,15 +278,10 @@ export function ensureEventPrivate(event: CalendarEvent): boolean {
  * イベント単位で例外を握り、1件の失敗で残りを止めない。
  * @returns 予定なし化した件数
  */
-export function makeExcludedEventsTransparent(
-  calendar: Calendar,
-  start: Date,
-  end: Date
-): number {
-  const events = calendar.getEvents(start, end);
+export function makeExcludedEventsTransparent(snapshot: CalendarSnapshot): number {
   let freed = 0;
 
-  for (const event of events) {
+  for (const event of snapshot.events) {
     try {
       // 自動ブロックは対象外（予定なし化しない）
       if (parseBlockMetadata(event) !== null) continue;
@@ -295,14 +309,11 @@ export function makeExcludedEventsTransparent(
  * 値は配列: 同一originキーで重複ブロックが存在する場合（過去のバグ・手動編集起因）の取りこぼし防止
  */
 export function findExistingBlockEvents(
-  calendar: Calendar,
-  start: Date,
-  end: Date
+  snapshot: CalendarSnapshot
 ): Map<string, CalendarEvent[]> {
-  const events = calendar.getEvents(start, end);
   const blockEvents = new Map<string, CalendarEvent[]>();
 
-  for (const event of events) {
+  for (const event of snapshot.events) {
     const metadata = parseBlockMetadata(event);
     if (metadata) {
       const o = getOriginFromMetadata(metadata);

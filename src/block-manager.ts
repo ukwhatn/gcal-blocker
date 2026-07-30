@@ -1,7 +1,7 @@
-import { BlockCandidate, CalendarConfig, SyncPeriod } from './types';
+import { BlockCandidate, SyncPeriod } from './types';
 import {
-  getCalendar,
-  getBlockableEvents,
+  CalendarSnapshot,
+  readCalendarSnapshot,
   findExistingBlockEvents,
   createBlockEvent,
   ensureEventPrivate,
@@ -26,29 +26,18 @@ interface PairSyncResult {
  *
  * - 作成判定: existingBlocks 全体（origin key）で重複防止
  * - 削除判定: direct source 一致の relevantBlocks のみ操作（所有権分離）
+ *
+ * existingBlocks は呼び出し側が保持する target の索引で、作成・削除に合わせて更新する
+ * （同一実行の後続ペアが同じ origin のブロックを二重作成しないため）
  */
 export function syncCalendarPair(
   sourceCalendarId: string,
-  targetCalendarId: string,
-  config: CalendarConfig,
-  period: SyncPeriod
+  blockCandidates: BlockCandidate[],
+  target: CalendarSnapshot,
+  existingBlocks: Map<string, CalendarEvent[]>
 ): PairSyncResult {
-  const sourceCalendar = getCalendar(sourceCalendarId);
-  const targetCalendar = getCalendar(targetCalendarId);
-
-  const blockCandidates = getBlockableEvents(
-    sourceCalendar,
-    period.start,
-    period.end,
-    config.calendarIds
-  );
+  const targetCalendarId = target.calendarId;
   console.log(`  ソースイベント数: ${blockCandidates.length}`);
-
-  const existingBlocks = findExistingBlockEvents(
-    targetCalendar,
-    period.start,
-    period.end
-  );
 
   // 削除責任分離: このソースが直接 put したブロックのみ削除候補化
   const relevantBlocks = new Map<string, CalendarEvent[]>();
@@ -82,7 +71,9 @@ export function syncCalendarPair(
     if (!existingBlocks.has(key)) {
       console.log(`  作成: ${candidate.sourceStartTime.toISOString()} (${candidate.isAllDay ? '終日' : '時間指定'}, origin=${candidate.originCalendarId})`);
       // 非公開ブロック作成に成功した場合のみ加算（失敗時は作成イベント削除済み・次回再試行）
-      if (createBlockEvent(targetCalendar, candidate)) {
+      const blockEvent = createBlockEvent(target.calendar, candidate);
+      if (blockEvent) {
+        existingBlocks.set(key, [blockEvent]);
         created++;
       } else {
         // 非公開化失敗でブロックは未作成（公開ブロックは残さない）。検知のため errors に記録
@@ -119,16 +110,35 @@ export function syncCalendarPair(
 
   // 削除: 自source の relevantBlocks のみ、配列全要素を対象
   for (const [key, events] of relevantBlocks) {
-    if (!candidateByKey.has(key)) {
-      for (const event of events) {
-        console.log(`  削除: ${event.getStartTime().toISOString()}`);
-        event.deleteEvent();
-        deleted++;
-      }
+    if (candidateByKey.has(key)) continue;
+    for (const event of events) {
+      console.log(`  削除: ${event.getStartTime().toISOString()}`);
+      event.deleteEvent();
+      removeFromIndex(existingBlocks, key, event);
+      deleted++;
     }
   }
 
   return { created, deleted, privatized, adjusted, errors };
+}
+
+/**
+ * 削除したブロックを target の索引から取り除く
+ * 同一キーに他 source のブロックが残る場合があるため、キーごと消さずに要素単位で外す
+ */
+function removeFromIndex(
+  existingBlocks: Map<string, CalendarEvent[]>,
+  key: string,
+  removed: CalendarEvent
+): void {
+  const remaining = (existingBlocks.get(key) ?? []).filter(
+    (event) => event.getId() !== removed.getId()
+  );
+  if (remaining.length > 0) {
+    existingBlocks.set(key, remaining);
+  } else {
+    existingBlocks.delete(key);
+  }
 }
 
 /**
@@ -140,8 +150,7 @@ export function clearBlockEvents(
   period: SyncPeriod,
   internalCalendarIds: string[]
 ): number {
-  const calendar = getCalendar(calendarId);
-  const existingBlocks = findExistingBlockEvents(calendar, period.start, period.end);
+  const existingBlocks = findExistingBlockEvents(readCalendarSnapshot(calendarId, period));
 
   let deleted = 0;
   for (const [, events] of existingBlocks) {
