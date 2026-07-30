@@ -78,7 +78,9 @@ export function clearAllCopyEvents(): { deleted: number; errors: string[] } {
 
 /**
  * 同期対象期間外に取り残されたコピーを削除
- * COPY_SOURCE_IDS の縮小や同期期間の短縮で孤児化したコピーの掃除に使う
+ * 同期期間の短縮で孤児化したコピーの掃除に使う
+ * 削除対象は自プロジェクト担当分のみなので、COPY_SOURCE_IDS から外したカレンダーのコピーは
+ * 一度 COPY_SOURCE_IDS へ戻して clearAllCopies() を実行する
  */
 export function clearOutOfRangeCopyEvents(): { deleted: number; errors: string[] } {
   const period = getSyncPeriod();
