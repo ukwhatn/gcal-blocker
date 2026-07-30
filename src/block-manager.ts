@@ -1,10 +1,11 @@
-import { CalendarConfig, SyncPeriod } from './types';
+import { BlockCandidate, CalendarConfig, SyncPeriod } from './types';
 import {
   getCalendar,
   getBlockableEvents,
   findExistingBlockEvents,
   createBlockEvent,
   ensureEventPrivate,
+  ensureBlockEventDuration,
   buildBlockKey,
   parseBlockMetadata,
 } from './calendar-service';
@@ -15,6 +16,7 @@ interface PairSyncResult {
   created: number;
   deleted: number;
   privatized: number;
+  adjusted: number;
   errors: string[];
 }
 
@@ -64,17 +66,18 @@ export function syncCalendarPair(
   let created = 0;
   let deleted = 0;
   let privatized = 0;
+  let adjusted = 0;
   const errors: string[] = [];
 
   // 作成: existingBlocks 全体で重複検知（origin key 一意性）
-  const candidateKeys = new Set<string>();
+  const candidateByKey = new Map<string, BlockCandidate>();
   for (const candidate of blockCandidates) {
     const key = buildBlockKey(
       candidate.originCalendarId,
       candidate.originEventId,
       candidate.originStartTime.toISOString()
     );
-    candidateKeys.add(key);
+    candidateByKey.set(key, candidate);
 
     if (!existingBlocks.has(key)) {
       console.log(`  作成: ${candidate.sourceStartTime.toISOString()} (${candidate.isAllDay ? '終日' : '時間指定'}, origin=${candidate.originCalendarId})`);
@@ -90,20 +93,25 @@ export function syncCalendarPair(
     }
   }
 
-  // 既存ブロックの是正: 自source の relevantBlocks が非公開でなければ非公開化
-  for (const [, events] of relevantBlocks) {
+  // 既存ブロックの是正: 自source の relevantBlocks を非公開化し、期間のずれを補正する
+  for (const [key, events] of relevantBlocks) {
+    const candidate = candidateByKey.get(key);
     for (const event of events) {
       try {
         if (ensureEventPrivate(event)) {
           console.log(`  非公開化: ${event.getStartTime().toISOString()}`);
           privatized++;
         }
+        if (candidate && ensureBlockEventDuration(event, candidate)) {
+          console.log(`  期間補正: ${event.getStartTime().toISOString()}`);
+          adjusted++;
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.warn(`  既存ブロックの非公開化に失敗: ${message}`);
-        // 公開ブロックが残存し得るため検知用に記録
+        console.warn(`  既存ブロックの是正に失敗: ${message}`);
+        // 公開ブロック・期間ずれが残存し得るため検知用に記録
         errors.push(
-          `ensureEventPrivate failed on ${targetCalendarId} @ ${event.getStartTime().toISOString()}: ${message}`
+          `ensure block failed on ${targetCalendarId} @ ${event.getStartTime().toISOString()}: ${message}`
         );
       }
     }
@@ -111,7 +119,7 @@ export function syncCalendarPair(
 
   // 削除: 自source の relevantBlocks のみ、配列全要素を対象
   for (const [key, events] of relevantBlocks) {
-    if (!candidateKeys.has(key)) {
+    if (!candidateByKey.has(key)) {
       for (const event of events) {
         console.log(`  削除: ${event.getStartTime().toISOString()}`);
         event.deleteEvent();
@@ -120,7 +128,7 @@ export function syncCalendarPair(
     }
   }
 
-  return { created, deleted, privatized, errors };
+  return { created, deleted, privatized, adjusted, errors };
 }
 
 /**

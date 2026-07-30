@@ -128,9 +128,18 @@ function isInternalAutoBlockEvent(
 export function parseBlockMetadata(
   event: CalendarEvent
 ): BlockMetadata | null {
-  const description = event.getDescription() || '';
+  return parseBlockMetadataFromDescription(event.getDescription());
+}
+
+/**
+ * description 文字列からブロックイベントのメタデータを解析
+ * CalendarApp を経由しない Calendar API 側からも同じ判定を使うために分離
+ */
+export function parseBlockMetadataFromDescription(
+  description: string | null | undefined
+): BlockMetadata | null {
   try {
-    const metadata = JSON.parse(description) as Partial<BlockMetadata>;
+    const metadata = JSON.parse(description || '') as Partial<BlockMetadata>;
     if (
       metadata.isAutoBlock === true &&
       metadata.sourceCalendarId &&
@@ -200,6 +209,33 @@ export function createBlockEvent(
       // 削除も失敗した場合は是正できない（次回 sync の ensureEventPrivate で再是正を試みる）
     }
     return false;
+  }
+  return true;
+}
+
+/**
+ * ブロックイベントの期間が候補とずれていれば補正する
+ * ブロックキーは開始時刻までしか含まないため、終了時刻だけが変わった予定はキー一致となり
+ * 作成も削除も起きない。その取りこぼしをここで補正する
+ * @returns 補正した場合 true
+ */
+export function ensureBlockEventDuration(
+  event: CalendarEvent,
+  candidate: BlockCandidate
+): boolean {
+  // 終日イベントの getEndTime() はカレンダーのタイムゾーン基準の翌日 0 時を返すため、
+  // ソースとターゲットのタイムゾーンが違うと絶対時刻の比較が常にずれる。所要時間で比較する
+  const blockDuration = event.getEndTime().getTime() - event.getStartTime().getTime();
+  const sourceDuration =
+    candidate.sourceEndTime.getTime() - candidate.sourceStartTime.getTime();
+  if (event.isAllDayEvent() === candidate.isAllDay && blockDuration === sourceDuration) {
+    return false;
+  }
+
+  if (candidate.isAllDay) {
+    event.setAllDayDates(candidate.sourceStartTime, candidate.sourceEndTime);
+  } else {
+    event.setTime(candidate.sourceStartTime, candidate.sourceEndTime);
   }
   return true;
 }
