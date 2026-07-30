@@ -1,5 +1,5 @@
 import { CopyCandidate, CopyConfig, CopyResult, ExistingCopy, SyncPeriod } from './types';
-import { getCopyConfig, getSyncPeriod } from './config';
+import { getCopyConfig, getCopyPeriod } from './config';
 import {
   deleteCopy,
   insertCopy,
@@ -17,7 +17,7 @@ const OUT_OF_RANGE_MONTHS = 6;
  */
 export function runCopy(): CopyResult {
   const config = getCopyConfig();
-  const period = getSyncPeriod();
+  const period = getCopyPeriod();
 
   console.log('=== コピー開始 ===');
   console.log(`コピー先: ${config.targetCalendarId}`);
@@ -73,7 +73,7 @@ export function runCopy(): CopyResult {
  * 自プロジェクト担当のコピーを同期対象期間内で全削除
  */
 export function clearAllCopyEvents(): { deleted: number; errors: string[] } {
-  return clearCopiesInPeriod(getSyncPeriod());
+  return clearCopiesInPeriod(getCopyPeriod());
 }
 
 /**
@@ -83,7 +83,7 @@ export function clearAllCopyEvents(): { deleted: number; errors: string[] } {
  * 一度 COPY_SOURCE_IDS へ戻して clearAllCopies() を実行する
  */
 export function clearOutOfRangeCopyEvents(): { deleted: number; errors: string[] } {
-  const period = getSyncPeriod();
+  const period = getCopyPeriod();
   const end = new Date(period.end);
   end.setMonth(end.getMonth() + OUT_OF_RANGE_MONTHS);
   return clearCopiesInPeriod({ start: period.end, end });

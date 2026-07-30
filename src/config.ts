@@ -6,8 +6,11 @@ export const BLOCK_TITLE = '予定あり(自動ブロック)';
 /** ブロック対象から除外するイベントタイトルのプレフィックス */
 export const EXCLUDED_PREFIXES = ['[TASK]', '⏳', '✅', '❌'];
 
-/** 同期対象期間（月数） */
+/** ブロック同期の対象期間（月数） */
 const SYNC_MONTHS = 1;
+
+/** コピーの対象期間（月数） */
+const COPY_MONTHS = 12;
 
 /** コピーイベントの目印（extendedProperties.private） */
 export const COPY_MARKER_KEY = 'isCopy';
@@ -50,13 +53,24 @@ export function getConfig(): CalendarConfig {
 }
 
 /**
- * 同期対象期間を取得
- * 現在〜3ヶ月後
+ * ブロック同期の対象期間を取得
  */
 export function getSyncPeriod(): SyncPeriod {
+  return buildPeriodFromNow(SYNC_MONTHS);
+}
+
+/**
+ * コピーの対象期間を取得
+ * ブロック同期より長い期間を扱う（コピーはカレンダー単位の読み取り 1 回で済むため）
+ */
+export function getCopyPeriod(): SyncPeriod {
+  return buildPeriodFromNow(COPY_MONTHS);
+}
+
+function buildPeriodFromNow(months: number): SyncPeriod {
   const now = new Date();
   const end = new Date(now);
-  end.setMonth(end.getMonth() + SYNC_MONTHS);
+  end.setMonth(end.getMonth() + months);
   return { start: now, end };
 }
 

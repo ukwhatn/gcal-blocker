@@ -124,6 +124,8 @@ bun run deploy:satellite
 | ゲスト | **設定しない**（実在の相手に招待メールが飛ぶため description の列挙に留める） |
 | 通知 | なし（`useDefault=false`） |
 
+対象期間はブロック同期と分かれており、コピーは現在〜1 年後（`COPY_MONTHS`）を見る。カレンダーごとに一覧取得 1 回で済むため、ブロック同期（`SYNC_MONTHS`、既定 1 ヶ月）より長い期間を扱える。
+
 ### コピー対象外
 
 自動ブロックイベント / Tasks・誕生日等の非 DEFAULT イベント / `EXCLUDED_PREFIXES` で始まるタイトル / 所有者が欠席（declined）した予定 / キャンセル済み予定。
@@ -195,7 +197,8 @@ bun run deploy:satellite
 |------|------|
 | `BLOCK_TITLE` | 自動作成ブロックイベントのタイトル（既定: `予定あり(自動ブロック)`） |
 | `EXCLUDED_PREFIXES` | ブロック・コピー対象から除外するタイトルprefix（`[TASK]`, `⏳`, `✅`, `❌`） |
-| `SYNC_MONTHS` | 同期・コピー対象期間（現在〜N ヶ月後、既定: 1） |
+| `SYNC_MONTHS` | ブロック同期の対象期間（現在〜N ヶ月後、既定: 1） |
+| `COPY_MONTHS` | コピーの対象期間（現在〜N ヶ月後、既定: 12） |
 
 ## 動作確認チェックリスト（手動）
 
