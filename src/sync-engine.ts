@@ -19,6 +19,7 @@ export function runSync(): SyncResult {
     created: 0,
     deleted: 0,
     privatized: 0,
+    adjusted: 0,
     freed: 0,
     errors: [],
   };
@@ -35,8 +36,9 @@ export function runSync(): SyncResult {
         result.created += pairResult.created;
         result.deleted += pairResult.deleted;
         result.privatized += pairResult.privatized;
+        result.adjusted += pairResult.adjusted;
         result.errors.push(...pairResult.errors);
-        console.log(`  結果: created=${pairResult.created}, deleted=${pairResult.deleted}, privatized=${pairResult.privatized}, errors=${pairResult.errors.length}`);
+        console.log(`  結果: created=${pairResult.created}, deleted=${pairResult.deleted}, privatized=${pairResult.privatized}, adjusted=${pairResult.adjusted}, errors=${pairResult.errors.length}`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         result.errors.push(`${sourceId} -> ${targetId}: ${message}`);
@@ -64,7 +66,7 @@ export function runSync(): SyncResult {
   }
 
   console.log('=== 同期完了 ===');
-  console.log(`合計: created=${result.created}, deleted=${result.deleted}, privatized=${result.privatized}, freed=${result.freed}, errors=${result.errors.length}`);
+  console.log(`合計: created=${result.created}, deleted=${result.deleted}, privatized=${result.privatized}, adjusted=${result.adjusted}, freed=${result.freed}, errors=${result.errors.length}`);
 
   return result;
 }

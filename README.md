@@ -5,6 +5,8 @@ Google Calendar の複数カレンダー間で予定を相互ブロックする 
 「Cal-A に予定が入っていたら、Cal-B/C/D にも『予定あり(自動ブロック)』を入れて他者からの招待を弾く」用途。
 出欠ステータス・「予定なし」設定・除外プレフィックスを尊重し、メタデータベースで作成/削除を冪等に追跡する。
 
+相互ブロックとは別に、**全プロジェクト共通の 1 カレンダーへ予定の中身をコピーする機能**を持つ（[イベントコピー機能](#イベントコピー機能)）。どの環境からでも全カレンダーの予定をタイトル・description つきで一覧できる。
+
 ## ブロック構成パターン
 
 ### パターン 1: シンプル（メインのみ）
@@ -99,6 +101,55 @@ bun run deploy:satellite
 7. GAS エディタで `setupTriggerSatellite()` を 1 回手動実行
 8. `syncCalendarsSatellite()` を手動実行して動作確認（ログで `role=satellite` 確認）
 
+## イベントコピー機能
+
+ブロック同期とは独立したトリガ（`copyEvents`）で、担当カレンダーの予定を共通カレンダーへコピーする。
+
+- コピーは Calendar API v3（Advanced Calendar Service）で行う。Meet URL の取得・所有者の出欠判定・不可視メタデータの保持がこれに依存する
+- **担当分離**: どのカレンダーをコピーするかは `COPY_SOURCE_IDS` で明示する。ブリッジカレンダーは複数プロジェクトの `CALENDAR_IDS` に含まれるため、`CALENDAR_IDS` を流用すると二重コピーと作成/削除の振動が起きる
+- **削除責任分離**: 作成・更新・削除はいずれも自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみを対象にする
+- コピー先カレンダーは **どのプロジェクトの `CALENDAR_IDS` にも含めない**（含めると全コピーがブロック元になる）。設定時に検証してエラーにする
+
+### コピー内容
+
+| 項目 | 値 |
+|------|-----|
+| タイトル | `[LABEL] 元タイトル`（LABEL は `CALENDAR_LABELS`、未設定時はドメインから導出） |
+| description | 元 description ＋ `# ゲスト`（アドレス列挙）＋ `# Meet`（URL） |
+| location | 元 location と Meet URL |
+| 開始/終了 | 元と同一（終日は終日イベント） |
+| 公開設定 | 元と同一（default / public / private） |
+| 予定の有無 | 元と同一（opaque / transparent） |
+| 色 | `CALENDAR_LABELS` で指定した colorId（1〜11） |
+| ゲスト | **設定しない**（実在の相手に招待メールが飛ぶため description の列挙に留める） |
+| 通知 | なし（`useDefault=false`） |
+
+### コピー対象外
+
+自動ブロックイベント / Tasks・誕生日等の非 DEFAULT イベント / `EXCLUDED_PREFIXES` で始まるタイトル / 所有者が欠席（declined）した予定 / キャンセル済み予定。
+
+「予定なし（transparent）」の予定・終日予定・未応答の招待はコピーする。
+
+### 更新と削除
+
+コピーには `extendedProperties.private` に `sourceCalendarId` / `sourceEventId` / `sourceUpdated` を持たせ、元イベントの `updated` と比較して変化したときだけ patch する。元イベントが削除・欠席化・除外対象化されたコピーは削除する。
+
+コピー元の一覧取得に失敗したカレンダーは、そのカレンダー由来のコピーを削除対象から除外する（一時エラーでの全消しを防ぐ）。
+
+削除は自プロジェクト担当分に限られるため、`COPY_SOURCE_IDS` からカレンダーを外すと、そのカレンダーのコピーは残る。掃除するには一度 `COPY_SOURCE_IDS` に戻して `clearAllCopies()` を実行する。
+
+### 共有時の注意
+
+コピー先カレンダーを第三者に共有する場合、**従来の「変更権限」では非公開イベントの詳細まで見える**。詳細を見せたくない相手には「予定の詳細の表示」か、2026-07 から提供の「変更（非公開の予定は予定あり/なしとして表示）」権限を使う。また visibility が `default` の予定は詳細表示権限で中身が見える。
+
+### セットアップ
+
+1. コピー先カレンダーを作成し、他プロジェクトの実行アカウントへ「予定の表示と変更」権限で共有する
+2. 各プロジェクトのスクリプトプロパティに `COPY_TARGET_CALENDAR_ID` / `COPY_SOURCE_IDS` / `CALENDAR_LABELS` を設定する
+3. `bun run deploy:*` で Advanced Calendar Service を含むマニフェストを push する
+4. GAS エディタで `copyEvents()` を 1 回手動実行し、Advanced Service の認可を通す
+5. `setupCopyTrigger()` を 1 回手動実行してトリガを登録する
+
 ## マイグレーション（既存環境からの移行）
 
 旧 `syncCalendars` トリガで運用していた場合の手順:
@@ -122,14 +173,29 @@ bun run deploy:satellite
 | `removeTriggerMain()` / `removeTriggerSatellite()` | 全 sync トリガ削除（旧 `syncCalendars` トリガ含む） |
 | `clearAllBlocks()` | 自スクリプト管理の全自動ブロック削除 |
 | `clearOutOfRangeBlocks()` | 同期対象期間外（SYNC_MONTHS 縮小時の孤児）の自動ブロック削除 |
+| `copyEvents()` | 共通カレンダーへのイベントコピー（トリガ登録ハンドラ） |
+| `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15 分トリガの登録・削除 |
+| `clearAllCopies()` | 自プロジェクト担当のコピーを全削除 |
+| `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピーを削除 |
 
-## 設定（src/config.ts）
+## 設定
+
+### スクリプトプロパティ
+
+| キー | 役割 |
+|------|------|
+| `CALENDAR_IDS` | 相互ブロックの対象カレンダー（カンマ区切り、2 つ以上） |
+| `COPY_TARGET_CALENDAR_ID` | コピー先の共通カレンダー ID（全プロジェクト同値） |
+| `COPY_SOURCE_IDS` | 自プロジェクトがコピーを担当するカレンダー（カンマ区切り） |
+| `CALENDAR_LABELS` | `<calendarId>:<LABEL>[:<colorId>]` をカンマ区切り。未設定のカレンダーはドメインからラベルを導出し色は付けない |
+
+### 定数（src/config.ts）
 
 | 定数 | 役割 |
 |------|------|
 | `BLOCK_TITLE` | 自動作成ブロックイベントのタイトル（既定: `予定あり(自動ブロック)`） |
-| `EXCLUDED_PREFIXES` | ブロック対象から除外するタイトルprefix（`[TASK]`, `⏳`, `✅`, `❌`） |
-| `SYNC_MONTHS` | 同期対象期間（現在〜N ヶ月後、既定: 1） |
+| `EXCLUDED_PREFIXES` | ブロック・コピー対象から除外するタイトルprefix（`[TASK]`, `⏳`, `✅`, `❌`） |
+| `SYNC_MONTHS` | 同期・コピー対象期間（現在〜N ヶ月後、既定: 1） |
 
 ## 動作確認チェックリスト（手動）
 
@@ -148,11 +214,13 @@ bun run deploy:satellite
 
 ```
 src/
-├── types.ts             # BlockMetadata/BlockCandidate/SyncResult/CalendarConfig 型定義
-├── config.ts            # スクリプトプロパティ読み込み、同期期間
+├── types.ts             # BlockMetadata/BlockCandidate/CopyCandidate/SyncResult 等の型定義
+├── config.ts            # スクリプトプロパティ読み込み、同期期間、ラベル導出
 ├── calendar-service.ts  # CalendarApp 操作、外部系統判定、origin 引き継ぎ
 ├── block-manager.ts     # カレンダーペア間の差分検出・適用、clear
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
+├── copy-service.ts      # Calendar API v3 操作、コピー対象判定、コピー内容の組み立て
+├── copy-engine.ts       # コピーの作成/更新/削除のオーケストレーション
 └── index.ts             # グローバル関数エクスポート
 ```
 
