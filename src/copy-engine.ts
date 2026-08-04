@@ -28,6 +28,9 @@ export function runCopy(): CopyResult {
   console.log(`コピー先: ${config.targetCalendarId}`);
   console.log(`担当カレンダー: ${config.sourceCalendarIds.join(', ')}`);
   console.log(`対象期間: ${period.start.toISOString()} ~ ${period.end.toISOString()}`);
+  console.log(
+    `出欠変更リンク: ${config.rsvpWebAppUrl || '未設定（RSVP_WEB_APP_URL を設定するとコピーにリンクを載せます）'}`
+  );
 
   const result: CopyResult = { created: 0, updated: 0, deleted: 0, applied: 0, errors: [] };
   const existingCopies = listExistingCopies(config.targetCalendarId, period);
@@ -192,11 +195,7 @@ function applyCandidate(
   }
 
   const [current, ...duplicates] = existing;
-  if (
-    current.sourceUpdated !== candidate.sourceUpdated ||
-    current.responseStatus !== candidate.responseStatus ||
-    current.responseComment !== candidate.responseComment
-  ) {
+  if (needsPatch(current, candidate)) {
     patchCopy(targetCalendarId, current, candidate);
     console.log(`  更新: ${candidate.payload.summary}`);
     result.updated++;
@@ -207,6 +206,22 @@ function applyCandidate(
     console.warn(`  重複コピーを削除: ${candidate.key}`);
     result.deleted++;
   }
+}
+
+/**
+ * コピーを書き直す必要があるかを判定する
+ *
+ * 組み立てた本文そのものを比べる。元イベントの updated だけを見ると、
+ * コピーの組み立て方を変えたとき（セクションの追加等）に既存のコピーが更新されない
+ */
+function needsPatch(current: ExistingCopy, candidate: CopyCandidate): boolean {
+  return (
+    current.sourceUpdated !== candidate.sourceUpdated ||
+    current.responseStatus !== candidate.responseStatus ||
+    current.responseComment !== candidate.responseComment ||
+    current.summary !== (candidate.payload.summary ?? '') ||
+    current.description !== (candidate.payload.description ?? '')
+  );
 }
 
 function deleteObsoleteCopies(

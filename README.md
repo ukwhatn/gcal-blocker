@@ -139,7 +139,7 @@ bun run deploy:satellite
 
 ### 更新と削除
 
-コピーには `extendedProperties.private` に `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` を持たせ、元イベントの `updated` か出欠が変化したときだけ patch する。元イベントが削除・除外対象化されたコピーは削除する。
+コピーには `extendedProperties.private` に `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` を持たせる。patch するのは、元イベントの `updated`・出欠・返信メモが変わったときに加えて、**組み立てたタイトルと description が現在のコピーと違うとき**。元イベントの `updated` だけで判定すると、コピーの組み立て方を変えたとき（セクションの追加等）に既存のコピーが更新されないため。元イベントが削除・除外対象化されたコピーは削除する。
 
 patch ではウェブアプリが書いたキー（`pendingResponse` / `note` 等）を既存メタから引き継ぐ。コピー同期側が書くのは上記 4 キーだけで、入力を上書きしない。
 

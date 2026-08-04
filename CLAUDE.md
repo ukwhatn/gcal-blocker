@@ -98,7 +98,7 @@ src/
 - **削除責任分離**: 作成・更新・削除はすべて自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみが対象
 - コピー先カレンダーは `CALENDAR_IDS` に含めてはならない（`getCopyConfig()` が検証してエラーにする）
 - ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
-- 更新は `Event.updated` と保存済み `sourceUpdated` の比較、および出欠の変化で差分 patch
+- 更新判定は `Event.updated` / 出欠 / 返信メモの変化に加え、**組み立てた summary・description と現在のコピーの差**を見る（元イベントの updated だけだと、コピーの組み立て方を変えたときに既存コピーが更新されない）
 
 ## 出欠変更ページ（ウェブアプリ）
 

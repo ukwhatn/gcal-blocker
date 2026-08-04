@@ -119,6 +119,8 @@ export interface CopyCandidate {
  */
 export interface ExistingCopy {
   eventId: string;
+  summary: string; // コピー先に現在書かれている内容。組み立て直した payload と比べて更新要否を決める
+  description: string;
   sourceCalendarId: string;
   sourceEventId: string;
   sourceUpdated: string;

@@ -373,6 +373,8 @@ function toExistingCopy(event: ApiEvent): ExistingCopy | null {
 
   return {
     eventId,
+    summary: event.summary ?? '',
+    description: event.description ?? '',
     sourceCalendarId: metadata.sourceCalendarId,
     sourceEventId: metadata.sourceEventId,
     sourceUpdated: metadata.sourceUpdated ?? '',
