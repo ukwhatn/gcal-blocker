@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <base target="_top" />
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --bg: #ffffff;
+        --card: #f6f7f9;
+        --text: #1f2328;
+        --muted: #62676d;
+        --border: #d8dce0;
+        --accent: #1a73e8;
+        --accent-text: #ffffff;
+        --warn: #b7791f;
+        --error: #c5221f;
+        --ok: #188038;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1b1d20;
+          --card: #26292d;
+          --text: #e8eaed;
+          --muted: #9aa0a6;
+          --border: #3c4043;
+          --accent: #8ab4f8;
+          --accent-text: #202124;
+          --warn: #fdd663;
+          --error: #f28b82;
+          --ok: #81c995;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0 auto;
+        padding: 16px 14px 40px;
+        max-width: 640px;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
+        font-size: 15px;
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 19px;
+        margin: 0 0 2px;
+        overflow-wrap: anywhere;
+      }
+      .when {
+        color: var(--muted);
+        margin-bottom: 2px;
+      }
+      .where {
+        color: var(--muted);
+        font-size: 14px;
+        overflow-wrap: anywhere;
+      }
+      section {
+        margin-top: 20px;
+      }
+      h2 {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--muted);
+        margin: 0 0 6px;
+      }
+      details pre,
+      .comment {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: inherit;
+        margin: 0;
+        padding: 8px 10px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+      details summary {
+        color: var(--muted);
+        font-size: 13px;
+        cursor: pointer;
+        margin-bottom: 6px;
+      }
+      .choices {
+        display: flex;
+        gap: 8px;
+      }
+      .choices button {
+        flex: 1;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 0;
+        cursor: pointer;
+      }
+      .choices button[aria-pressed='true'] {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: var(--accent-text);
+        font-weight: 600;
+      }
+      textarea {
+        width: 100%;
+        min-height: 88px;
+        padding: 8px 10px;
+        font: inherit;
+        color: inherit;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        resize: vertical;
+      }
+      #submit {
+        width: 100%;
+        margin-top: 20px;
+        padding: 12px 0;
+        font: inherit;
+        font-weight: 600;
+        color: var(--accent-text);
+        background: var(--accent);
+        border: none;
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      #submit:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .note {
+        font-size: 13px;
+        color: var(--muted);
+        margin-top: 10px;
+      }
+      .note.pending {
+        color: var(--warn);
+      }
+      .note.error {
+        color: var(--error);
+      }
+      .note.ok {
+        color: var(--ok);
+      }
+      .message {
+        padding: 24px 0;
+        color: var(--error);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="initial-state" hidden><?= initialState ?></div>
+    <main id="app"></main>
+
+    <script>
+      var RESPONSES = [
+        { value: 'accepted', label: '参加' },
+        { value: 'tentative', label: '未定' },
+        { value: 'declined', label: '欠席' },
+      ];
+      var STATUS_LABELS = {
+        accepted: '参加',
+        tentative: '未定',
+        declined: '欠席',
+        needsAction: '未応答',
+        none: '出欠なし',
+        '': '未取得',
+      };
+
+      var app = document.getElementById('app');
+      var state = JSON.parse(document.getElementById('initial-state').textContent);
+      var selected = '';
+
+      if (state.error) {
+        showMessage(state.error);
+      } else {
+        render(state.view, '');
+      }
+
+      function showMessage(message) {
+        app.textContent = '';
+        var p = document.createElement('p');
+        p.className = 'message';
+        p.textContent = message;
+        app.appendChild(p);
+      }
+
+      function render(view, resultText) {
+        app.textContent = '';
+        selected = view.pendingResponse || view.responseStatus;
+
+        app.appendChild(element('h1', null, view.title));
+        app.appendChild(element('div', 'when', view.dateLabel + ' ' + view.timeLabel));
+        if (view.location) app.appendChild(element('div', 'where', view.location));
+        if (view.detail) app.appendChild(buildDetail(view.detail));
+
+        app.appendChild(section('出欠', buildChoices(view)));
+
+        var comment = document.createElement('textarea');
+        comment.placeholder = '返信メモ（主催者とゲストに見えます）';
+        comment.value = view.pendingComment || view.responseComment;
+        comment.disabled = !view.canRespond;
+        app.appendChild(section('返信メモ', comment));
+
+        var statusNote = buildStatusNote(view, resultText);
+        var submit = document.createElement('button');
+        submit.id = 'submit';
+        submit.type = 'button';
+        submit.textContent = '更新する';
+        submit.disabled = !view.canRespond;
+        submit.addEventListener('click', function () {
+          save(view, submit, comment.value, statusNote);
+        });
+
+        app.appendChild(submit);
+        app.appendChild(statusNote);
+      }
+
+      function buildChoices(view) {
+        var choices = document.createElement('div');
+        choices.className = 'choices';
+
+        RESPONSES.forEach(function (response) {
+          var button = document.createElement('button');
+          button.type = 'button';
+          button.textContent = response.label;
+          button.setAttribute('aria-pressed', selected === response.value ? 'true' : 'false');
+          button.disabled = !view.canRespond;
+          button.addEventListener('click', function () {
+            selected = response.value;
+            Array.prototype.forEach.call(choices.children, function (child) {
+              child.setAttribute('aria-pressed', child === button ? 'true' : 'false');
+            });
+          });
+          choices.appendChild(button);
+        });
+
+        return choices;
+      }
+
+      function buildStatusNote(view, resultText) {
+        if (resultText) return element('p', 'note ok', resultText);
+        if (view.responseError) return element('p', 'note error', view.responseError);
+        if (view.pendingResponse) {
+          return element('p', 'note pending', '反映待ち: 次の同期（最大 15 分）で元の予定へ反映されます');
+        }
+        if (!view.canRespond) {
+          return element('p', 'note', 'ゲストとして登録されていない予定のため出欠を設定できません');
+        }
+        return element('p', 'note', '現在の出欠: ' + label(view.responseStatus));
+      }
+
+      function buildDetail(detail) {
+        var wrapper = document.createElement('details');
+        var summary = document.createElement('summary');
+        summary.textContent = '予定の詳細';
+        var body = document.createElement('pre');
+        body.textContent = detail;
+        wrapper.appendChild(summary);
+        wrapper.appendChild(body);
+        return wrapper;
+      }
+
+      function save(view, submit, comment, statusNote) {
+        if (!isValidResponse(selected)) {
+          setNote(statusNote, 'note error', '出欠を選択してください');
+          return;
+        }
+
+        submit.disabled = true;
+        submit.textContent = '送信中…';
+        setNote(statusNote, 'note', '送信中…');
+
+        google.script.run
+          .withSuccessHandler(function (updated) {
+            render(updated, updated.pendingResponse ? '' : '更新しました');
+          })
+          .withFailureHandler(function (error) {
+            submit.disabled = false;
+            submit.textContent = '更新する';
+            setNote(statusNote, 'note error', error.message);
+          })
+          .submitResponse({
+            sourceCalendarId: view.sourceCalendarId,
+            sourceEventId: view.sourceEventId,
+            response: selected,
+            comment: comment,
+          });
+      }
+
+      function section(heading, body) {
+        var wrapper = document.createElement('section');
+        wrapper.appendChild(element('h2', null, heading));
+        wrapper.appendChild(body);
+        return wrapper;
+      }
+
+      function element(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text) node.textContent = text;
+        return node;
+      }
+
+      function setNote(node, className, text) {
+        node.className = className;
+        node.textContent = text;
+      }
+
+      function isValidResponse(value) {
+        return RESPONSES.some(function (response) {
+          return response.value === value;
+        });
+      }
+
+      function label(status) {
+        return STATUS_LABELS[status] || status;
+      }
+    </script>
+  </body>
+</html>

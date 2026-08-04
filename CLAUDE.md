@@ -66,8 +66,8 @@ src/
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
 ├── copy-service.ts      # Calendar API v3 操作、コピー対象判定、コピー内容の組み立て、出欠の反映
 ├── copy-engine.ts       # コピーの作成/更新/削除・出欠入力の消費のオーケストレーション
-├── rsvp-webapp.ts       # 出欠入力ウェブアプリのサーバ側（一覧取得・入力保存）
-├── ui/agenda.html       # 出欠入力ウェブアプリの画面（ビルドで dist/ へコピー）
+├── rsvp-webapp.ts       # 出欠変更ページのサーバ側（1 件の状態取得・入力保存）
+├── ui/rsvp.html         # 出欠変更ページの画面（ビルドで dist/ へコピー）
 └── index.ts             # グローバル関数エクスポート
 ```
 
@@ -86,8 +86,8 @@ src/
 | `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15分トリガの登録・削除（sync トリガとは独立） |
 | `clearAllCopies()` | 自プロジェクト担当のコピーを全削除（他プロジェクト担当は保護） |
 | `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピー削除 |
-| `doGet()` | 出欠入力ウェブアプリ（メインのみデプロイ） |
-| `getAgenda()` / `submitResponse()` | ウェブアプリのクライアントから `google.script.run` 経由で呼ばれる |
+| `doGet(e)` | 出欠変更ページ（メインのみデプロイ。`?c=<コピー元カレンダー>&e=<コピー元イベント>`） |
+| `submitResponse()` | ページのクライアントから `google.script.run` 経由で呼ばれる |
 
 ## イベントコピー機能
 
@@ -100,16 +100,18 @@ src/
 - ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
 - 更新は `Event.updated` と保存済み `sourceUpdated` の比較、および出欠の変化で差分 patch
 
-## 出欠入力（ウェブアプリ）
+## 出欠変更ページ（ウェブアプリ）
 
-集約カレンダーから出欠とメモを入力する画面。**メインだけ**をウェブアプリとしてデプロイする（`dist/appsscript.json` の `webapp` は `access: MYSELF` / `executeAs: USER_DEPLOYING`）。
+集約カレンダーのコピーの description に載せたリンクから、その 1 件の出欠と返信メモを変更する画面。一覧は持たない（カレンダーの下位互換になるため）。**メインだけ**をウェブアプリとしてデプロイする（`dist/appsscript.json` の `webapp` は `access: MYSELF` / `executeAs: USER_DEPLOYING`）。
 
-- Calendar API は RSVP の変更に「そのカレンダーへの書き込み権限」を要求するため、CalD の予定はメインから直接書けない。入力をコピーの `pendingResponse` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを反映する**（メイン担当分は `submitResponse` 内で即時反映）
-- 元イベントへの書き込みは attendees 配列ごと patch する（自分のエントリだけを差し替える。配列を部分送信すると他のゲストが消える）
-- メモは集約カレンダー側のみ（description の `# メモ` セクション ＋ `note` メタ）。元カレンダーには書かない
-- コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` だけ
+- リンクは `?c=<コピー元カレンダー>&e=<コピー元イベント>`。**コピー先の event ID は使わない** — insert のレスポンスを待たないと決まらず、リンクを書くために作成直後もう一度 patch する必要が出るため。ページ側は `privateExtendedProperty` でコピーを引く
+- リンクの URL はスクリプトプロパティ `RSVP_WEB_APP_URL` から取る。サテライトも同じリンクを description に書くため、`ScriptApp.getService().getUrl()` は使えない（自分自身の URL を書いてしまう）
+- Calendar API は RSVP の変更に「そのカレンダーへの書き込み権限」を要求するため、CalD の予定はメインから直接書けない。入力をコピーの `pendingAt` / `pendingResponse` / `pendingComment` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを反映する**（メイン担当分は `submitResponse` 内で即時反映）
+- 元イベントへの書き込みは attendees 配列ごと patch する（自分のエントリだけを差し替える。配列を部分送信すると他のゲストが消える）。反映結果は patch のレスポンスから読み直して保存する
+- **返信メモは `attendees[].comment`** なので主催者と他ゲストに見える。集約カレンダー側には description の `# 返信メモ` として出る
+- コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` だけ
 - `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
-- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ウェブアプリから取り消せるようにするため）
+- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）
 - **ウェブアプリはコード push だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
 
 ### スクリプトプロパティ
@@ -119,10 +121,11 @@ src/
 | `COPY_TARGET_CALENDAR_ID` | コピー先の共通カレンダー ID（全プロジェクト同値） |
 | `COPY_SOURCE_IDS` | 自プロジェクトが担当するコピー元（カンマ区切り） |
 | `CALENDAR_LABELS` | `<calendarId>:<LABEL>[:<colorId>]` をカンマ区切り。未設定時はドメインからラベルを導出 |
+| `RSVP_WEB_APP_URL` | メインの出欠変更ページの `/exec` URL。全プロジェクトに同値を設定する |
 
 ### メタデータ設計
 
-コピーイベントのメタは `extendedProperties.private`（Calendar API v3）。コピー同期が書く 5 キーに加え、ウェブアプリが `pendingResponse` / `pendingResponseAt` / `note` を、反映処理が `responseError` を書く。Calendar API は値を削除できないため、消費済みの入力は空文字で消す。
+コピーイベントのメタは `extendedProperties.private`（Calendar API v3）。コピー同期が書く 6 キーに加え、ウェブアプリが `pendingAt` / `pendingResponse` / `pendingComment` を、反映処理が `responseError` を書く。Calendar API は値を削除できないため、消費済みの入力は空文字で消す（`pendingAt` の有無が未反映の入力があるかの判定）。
 
 ブロックイベントの description には JSON 形式でメタデータを埋め込む。
 

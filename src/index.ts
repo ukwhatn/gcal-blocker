@@ -8,8 +8,8 @@
 
 import { runSync, clearAllBlockEvents, clearOutOfRangeBlockEvents } from './sync-engine';
 import { runCopy, clearAllCopyEvents, clearOutOfRangeCopyEvents } from './copy-engine';
-import { loadAgenda, renderAgendaPage, submitRsvp } from './rsvp-webapp';
-import { AgendaItem, RsvpSubmission } from './types';
+import { renderRsvpPage, submitRsvp } from './rsvp-webapp';
+import { RsvpSubmission, RsvpView } from './types';
 
 const MAIN_HANDLER = 'syncCalendarsMain';
 const SATELLITE_HANDLER = 'syncCalendarsSatellite';
@@ -67,26 +67,20 @@ export function copyEvents(): void {
   }
 }
 
-// --- RSVP Web App（メインプロジェクトだけをウェブアプリとしてデプロイする）---
+// --- 出欠変更ウェブアプリ（メインプロジェクトだけをデプロイする）---
 
 /**
- * 予定一覧ページ（ウェブアプリのエントリポイント）
+ * 出欠変更ページ（ウェブアプリのエントリポイント）
+ * 集約カレンダーの予定に載せたリンク（?c=<コピー元カレンダー>&e=<コピー元イベント>）から開く
  */
-export function doGet(): GoogleAppsScript.HTML.HtmlOutput {
-  return renderAgendaPage();
+export function doGet(request: GoogleAppsScript.Events.DoGet): GoogleAppsScript.HTML.HtmlOutput {
+  return renderRsvpPage(request);
 }
 
 /**
- * 予定一覧を返す（google.script.run から呼ばれる）
+ * 出欠・返信メモを保存する（google.script.run から呼ばれる）
  */
-export function getAgenda(): AgendaItem[] {
-  return loadAgenda();
-}
-
-/**
- * 出欠・メモを保存する（google.script.run から呼ばれる）
- */
-export function submitResponse(submission: RsvpSubmission): AgendaItem {
+export function submitResponse(submission: RsvpSubmission): RsvpView {
   return submitRsvp(submission);
 }
 

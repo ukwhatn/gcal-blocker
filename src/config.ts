@@ -19,9 +19,6 @@ export const COPY_MARKER_VALUE = 'true';
 /** タイトルが空のイベントをコピーする際の代替タイトル */
 export const UNTITLED_EVENT_TITLE = '(無題)';
 
-/** Web App が予定一覧に表示する日数 */
-const AGENDA_DAYS = 14;
-
 /** 元イベントに自分の出欠エントリがない（出欠の概念がない）予定を表す responseStatus */
 export const RESPONSE_NONE = 'none';
 
@@ -35,8 +32,17 @@ export const RESPONSE_MARKS: Record<string, string> = {
   needsAction: '？',
 };
 
-/** メモの最大文字数（extendedProperties.private の 1 値あたり上限に対する安全マージン） */
-export const NOTE_MAX_LENGTH = 900;
+/** 返信メモの最大文字数（extendedProperties.private の 1 値あたり上限に対する安全マージン） */
+export const COMMENT_MAX_LENGTH = 900;
+
+/**
+ * 出欠変更ページ（メインプロジェクトのウェブアプリ）の URL
+ * サテライトも同じ URL をコピーへ書くため、自分の URL を引かずプロパティから取る。
+ * 未設定なら出欠変更リンクを載せない
+ */
+function getRsvpWebAppUrl(): string {
+  return (PropertiesService.getScriptProperties().getProperty('RSVP_WEB_APP_URL') ?? '').trim();
+}
 
 /**
  * 外部（Web App の入力・保存済みメタ）から受け取った文字列を出欠として解釈する
@@ -93,18 +99,6 @@ export function getCopyPeriod(): SyncPeriod {
   return buildPeriodFromNow(COPY_MONTHS);
 }
 
-/**
- * Web App の予定一覧が対象とする期間
- * 開始済みの当日分も残すため、現在時刻ではなく当日 0 時から始める
- */
-export function getAgendaPeriod(): SyncPeriod {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(start);
-  end.setDate(end.getDate() + AGENDA_DAYS);
-  return { start, end };
-}
-
 function buildPeriodFromNow(months: number): SyncPeriod {
   const now = new Date();
   const end = new Date(now);
@@ -148,6 +142,7 @@ export function getCopyConfig(): CopyConfig {
     targetCalendarId,
     sourceCalendarIds,
     labels: parseCalendarLabels(props.getProperty('CALENDAR_LABELS')),
+    rsvpWebAppUrl: getRsvpWebAppUrl(),
   };
 }
 

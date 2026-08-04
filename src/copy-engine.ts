@@ -7,14 +7,14 @@ import {
   listCopyCandidates,
   listExistingCopies,
   patchCopy,
-  patchCopyState,
+  patchCopyMetadata,
 } from './copy-service';
 
 /** 期間外コピーの掃除で遡る月数 */
 const OUT_OF_RANGE_MONTHS = 6;
 
-/** 出欠入力を消費したあとのメタ（Calendar API は値の削除ができないため空文字で消す） */
-const CONSUMED_PENDING = { pendingResponse: '', pendingResponseAt: '' };
+/** 出欠入力を消費したあとのメタ（Calendar API は値を削除できないため空文字で消す） */
+const CONSUMED_PENDING = { pendingAt: '', pendingResponse: '', pendingComment: '' };
 
 /**
  * 担当カレンダーの予定を共通カレンダーへコピーする
@@ -40,12 +40,7 @@ export function runCopy(): CopyResult {
   for (const sourceCalendarId of config.sourceCalendarIds) {
     console.log(`--- ${sourceCalendarId} ---`);
     try {
-      const candidates = listCopyCandidates(
-        sourceCalendarId,
-        period,
-        config.labels,
-        existingCopies
-      );
+      const candidates = listCopyCandidates(sourceCalendarId, period, config);
       console.log(`  コピー対象: ${candidates.length}`);
 
       for (const candidate of candidates) {
@@ -100,7 +95,7 @@ export function applyPendingResponses(
 
   for (const copies of existingCopies.values()) {
     for (const copy of copies) {
-      if (!copy.pendingResponse) continue;
+      if (!copy.pendingAt) continue;
       if (!config.sourceCalendarIds.includes(copy.sourceCalendarId)) continue;
 
       try {
@@ -117,37 +112,33 @@ export function applyPendingResponses(
 }
 
 /**
- * 1 件の出欠入力を元カレンダーへ反映し、入力を消費済みにする
- * 反映できなかった理由はコピーに残して Web App から見えるようにする
+ * 1 件の入力を元カレンダーへ反映し、入力を消費済みにする
+ * 反映できなかった理由はコピーに残してウェブアプリから見えるようにする
  */
 export function applyPendingResponse(targetCalendarId: string, copy: ExistingCopy): boolean {
-  const response = toRsvpResponse(copy.pendingResponse);
-
-  if (!response) {
-    patchCopyState(targetCalendarId, copy, {
-      metadata: { ...CONSUMED_PENDING, responseError: `不正な出欠値です: ${copy.pendingResponse}` },
-    });
-    return false;
-  }
-
-  const outcome = applyResponseToSourceEvent(copy.sourceCalendarId, copy.sourceEventId, response);
+  const outcome = applyResponseToSourceEvent(
+    copy.sourceCalendarId,
+    copy.sourceEventId,
+    toRsvpResponse(copy.pendingResponse),
+    copy.pendingComment
+  );
 
   if (outcome.status === 'notApplicable') {
-    patchCopyState(targetCalendarId, copy, {
-      metadata: { ...CONSUMED_PENDING, responseError: outcome.reason },
+    patchCopyMetadata(targetCalendarId, copy, {
+      ...CONSUMED_PENDING,
+      responseError: outcome.reason,
     });
     console.log(`  出欠を反映できず: ${copy.sourceEventId} (${outcome.reason})`);
     return false;
   }
 
-  patchCopyState(targetCalendarId, copy, {
-    metadata: {
-      ...CONSUMED_PENDING,
-      responseError: '',
-      responseStatus: outcome.responseStatus,
-    },
+  patchCopyMetadata(targetCalendarId, copy, {
+    ...CONSUMED_PENDING,
+    responseError: '',
+    responseStatus: outcome.response.status,
+    responseComment: outcome.response.comment,
   });
-  console.log(`  出欠を反映: ${copy.sourceEventId} -> ${outcome.responseStatus}`);
+  console.log(`  出欠を反映: ${copy.sourceEventId} -> ${outcome.response.status}`);
   return true;
 }
 
@@ -203,7 +194,8 @@ function applyCandidate(
   const [current, ...duplicates] = existing;
   if (
     current.sourceUpdated !== candidate.sourceUpdated ||
-    current.responseStatus !== candidate.responseStatus
+    current.responseStatus !== candidate.responseStatus ||
+    current.responseComment !== candidate.responseComment
   ) {
     patchCopy(targetCalendarId, current, candidate);
     console.log(`  更新: ${candidate.payload.summary}`);

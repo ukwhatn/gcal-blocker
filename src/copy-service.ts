@@ -1,16 +1,17 @@
 import {
   CalendarLabel,
   CopyCandidate,
+  CopyConfig,
   CopyMetadata,
   ExistingCopy,
   RsvpResponse,
   SyncPeriod,
 } from './types';
 import {
+  COMMENT_MAX_LENGTH,
   COPY_MARKER_KEY,
   COPY_MARKER_VALUE,
   EXCLUDED_PREFIXES,
-  NOTE_MAX_LENGTH,
   RESPONSE_MARKS,
   RESPONSE_NONE,
   UNTITLED_EVENT_TITLE,
@@ -22,23 +23,36 @@ type ApiEvent = GoogleAppsScript.Calendar.Schema.Event;
 type EventsCollection = GoogleAppsScript.Calendar.Collection.EventsCollection;
 
 const PAGE_SIZE = 250;
-const NOTE_SECTION_HEADING = '# メモ';
 const GUEST_SECTION_HEADING = '# ゲスト';
 const MEET_SECTION_HEADING = '# Meet';
 const LOCATION_SEPARATOR = ' / ';
 const SECTION_SEPARATOR = '\n\n';
+
+/** 返信メモ（元イベントの attendee コメント）を載せる見出し */
+export const COMMENT_SECTION_HEADING = '# 返信メモ';
+
+/** 出欠変更ページへのリンクを載せる見出し */
+export const RSVP_SECTION_HEADING = '# 出欠変更';
+
+/**
+ * 元イベントに記録されている自分の出欠
+ */
+export interface OwnerResponse {
+  status: string;
+  comment: string;
+}
 
 /**
  * 元イベントへの出欠反映の結果
  * 権限エラー等は例外として投げ、出欠を持たない予定だけを notApplicable で返す
  */
 export type RsvpApplyOutcome =
-  | { status: 'applied'; responseStatus: string }
+  | { status: 'applied'; response: OwnerResponse }
   | { status: 'notApplicable'; reason: string };
 
 /**
  * コピー先に存在するコピーイベントと、そこに保存された状態
- * 表示に本体（タイトル・時刻）が要る Web App のために両方を返す
+ * 表示に本体（タイトル・時刻）が要るウェブアプリのために両方を返す
  */
 export interface CopySnapshot {
   event: ApiEvent;
@@ -63,40 +77,37 @@ export function getEventsApi(): EventsCollection {
 /**
  * コピー元カレンダーから、コピー対象イベントを取得して payload まで組み立てる
  * 除外対象（自動ブロック・非DEFAULT・除外prefix・キャンセル）はここで落とす
- * existingCopies は既存コピーのメモを payload に引き継ぐために使う
  */
 export function listCopyCandidates(
   sourceCalendarId: string,
   period: SyncPeriod,
-  labels: Record<string, CalendarLabel>,
-  existingCopies: Map<string, ExistingCopy[]>
+  config: CopyConfig
 ): CopyCandidate[] {
-  const label = getCalendarLabel(sourceCalendarId, labels);
+  const label = getCalendarLabel(sourceCalendarId, config.labels);
 
   return listEvents(sourceCalendarId, period)
     .filter((event) => isCopyable(event))
     .map((event) => {
       const sourceEventId = event.id ?? '';
       const sourceUpdated = event.updated ?? '';
-      const responseStatus = getOwnerResponseStatus(event, sourceCalendarId);
-      const key = buildCopyKey(sourceCalendarId, sourceEventId);
-      const note = existingCopies.get(key)?.[0]?.note ?? '';
+      const owner = getOwnerResponse(event, sourceCalendarId);
 
       return {
-        key,
+        key: buildCopyKey(sourceCalendarId, sourceEventId),
         sourceCalendarId,
         sourceEventId,
         sourceUpdated,
-        responseStatus,
+        responseStatus: owner.status,
+        responseComment: owner.comment,
         payload: {
-          ...buildCopyPayload(event, label, responseStatus, note),
+          ...buildCopyPayload(
+            event,
+            label,
+            owner,
+            buildRsvpUrl(config, sourceCalendarId, sourceEventId, owner)
+          ),
           extendedProperties: {
-            private: buildCopyMetadata(
-              sourceCalendarId,
-              sourceEventId,
-              sourceUpdated,
-              responseStatus
-            ),
+            private: buildCopyMetadata(sourceCalendarId, sourceEventId, sourceUpdated, owner),
           },
         },
       };
@@ -139,13 +150,33 @@ export function listCopySnapshots(targetCalendarId: string, period: SyncPeriod):
 }
 
 /**
- * コピー先の 1 件を取得する
- * 自スクリプトが作ったコピーでなければ null を返す（Web App から任意の eventId を渡されても書き換えない）
+ * コピー元の識別子からコピーを引く
+ *
+ * ウェブアプリの URL にはコピー先の event ID ではなくコピー元の識別子を載せる。
+ * コピー先の ID は insert のレスポンスを待たないと決まらず、リンクを description に
+ * 書くために作成直後もう一度 patch する必要が出るため
  */
-export function getCopySnapshot(targetCalendarId: string, eventId: string): CopySnapshot | null {
-  const event = getEventsApi().get(targetCalendarId, eventId);
-  const state = toExistingCopy(event);
-  return state ? { event, state } : null;
+export function findCopyBySource(
+  targetCalendarId: string,
+  sourceCalendarId: string,
+  sourceEventId: string
+): CopySnapshot | null {
+  const page = getEventsApi().list(targetCalendarId, {
+    privateExtendedProperty: [
+      `${COPY_MARKER_KEY}=${COPY_MARKER_VALUE}`,
+      `sourceCalendarId=${sourceCalendarId}`,
+      `sourceEventId=${sourceEventId}`,
+    ],
+    showDeleted: false,
+    maxResults: 2,
+  });
+
+  for (const event of page.items ?? []) {
+    const state = toExistingCopy(event);
+    if (state) return { event, state };
+  }
+
+  return null;
 }
 
 export function insertCopy(targetCalendarId: string, candidate: CopyCandidate): void {
@@ -154,7 +185,7 @@ export function insertCopy(targetCalendarId: string, candidate: CopyCandidate): 
 
 /**
  * 既存コピーを最新の内容へ更新する
- * Web App が書いたメタ（pendingResponse / note 等）を消さないよう、既存メタに上書きする形で送る
+ * ウェブアプリが書いたメタ（pending*）を消さないよう、既存メタに上書きする形で送る
  */
 export function patchCopy(
   targetCalendarId: string,
@@ -171,33 +202,29 @@ export function patchCopy(
 }
 
 /**
- * コピーのメタデータ・description だけを更新する
- * 省略したフィールドは変更しない
+ * コピーのメタデータだけを更新する
  *
  * 渡された copy も最新化する。同じ run の後続処理（コピー同期の patch）が
- * 古いメタをマージし直すと、消したはずの出欠入力が復活するため
+ * 古いメタをマージし直すと、消したはずの入力が復活するため
  */
-export function patchCopyState(
+export function patchCopyMetadata(
   targetCalendarId: string,
   copy: ExistingCopy,
-  patch: { metadata?: Record<string, string>; description?: string }
+  changes: Record<string, string>
 ): void {
-  const metadata = patch.metadata ? { ...copy.metadata, ...patch.metadata } : copy.metadata;
-  const payload: ApiEvent = {};
-
-  if (patch.metadata) {
-    payload.extendedProperties = { private: metadata };
-  }
-  if (patch.description != null) {
-    payload.description = patch.description;
-  }
-
-  getEventsApi().patch(payload, targetCalendarId, copy.eventId);
+  const metadata = { ...copy.metadata, ...changes };
+  getEventsApi().patch(
+    { extendedProperties: { private: metadata } },
+    targetCalendarId,
+    copy.eventId
+  );
 
   copy.metadata = metadata;
   copy.responseStatus = metadata.responseStatus ?? '';
+  copy.responseComment = metadata.responseComment ?? '';
+  copy.pendingAt = metadata.pendingAt ?? '';
   copy.pendingResponse = metadata.pendingResponse ?? '';
-  copy.note = metadata.note ?? '';
+  copy.pendingComment = metadata.pendingComment ?? '';
   copy.responseError = metadata.responseError ?? '';
 }
 
@@ -206,14 +233,15 @@ export function deleteCopy(targetCalendarId: string, eventId: string): void {
 }
 
 /**
- * 元カレンダーのイベントへ出欠を書き込む
+ * 元カレンダーのイベントへ出欠と返信メモを書き込む
  * 自分（コピー元カレンダー）の attendee エントリだけを差し替える。
  * attendees は配列ごと送らないと他のゲストが消えるため、取得したものを写して送る
  */
 export function applyResponseToSourceEvent(
   sourceCalendarId: string,
   sourceEventId: string,
-  response: RsvpResponse
+  response: RsvpResponse | null,
+  comment: string
 ): RsvpApplyOutcome {
   const api = getEventsApi();
   const event = api.get(sourceCalendarId, sourceEventId);
@@ -231,11 +259,13 @@ export function applyResponseToSourceEvent(
     };
   }
 
-  api.patch(
+  // 反映結果は patch のレスポンスから読み直す。API が値を受け付けなかったとき、
+  // 送った値を「反映済み」として保存しないため
+  const applied = api.patch(
     {
       attendees: attendees.map((attendee) =>
         attendee.email?.toLowerCase() === owner
-          ? { ...attendee, responseStatus: response }
+          ? { ...attendee, responseStatus: response ?? attendee.responseStatus, comment }
           : attendee
       ),
     },
@@ -243,7 +273,7 @@ export function applyResponseToSourceEvent(
     sourceEventId
   );
 
-  return { status: 'applied', responseStatus: response };
+  return { status: 'applied', response: getOwnerResponse(applied, sourceCalendarId) };
 }
 
 export function buildCopyKey(sourceCalendarId: string, sourceEventId: string): string {
@@ -251,34 +281,21 @@ export function buildCopyKey(sourceCalendarId: string, sourceEventId: string): s
 }
 
 /**
- * description のメモセクションを差し替える
- * Web App は担当外カレンダーの元イベントを読めないため、description 全体を組み直さず
- * セクション単位で差し替える
+ * description から指定した見出しのセクションを取り除く
  */
-export function replaceNoteSection(description: string | undefined, note: string): string {
-  const sections = (description ?? '')
+export function stripSections(description: string | undefined, headings: string[]): string {
+  return (description ?? '')
     .split(SECTION_SEPARATOR)
-    .filter((section) => !section.startsWith(NOTE_SECTION_HEADING))
-    .filter((section) => section.trim() !== '');
-
-  const normalized = normalizeNote(note);
-  if (normalized) {
-    sections.unshift(`${NOTE_SECTION_HEADING}\n${normalized}`);
-  }
-
-  return sections.join(SECTION_SEPARATOR);
+    .filter((section) => !headings.some((heading) => section.startsWith(heading)))
+    .filter((section) => section.trim() !== '')
+    .join(SECTION_SEPARATOR);
 }
 
 /**
- * メモを保存できる形に整える
- * 空行はセクション区切りと衝突して次回の差し替えで取り残されるため 1 行に潰す
+ * 返信メモを保存できる形に整える
  */
-export function normalizeNote(note: string): string {
-  return note
-    .trim()
-    .replace(/\r\n/g, '\n')
-    .replace(/\n{2,}/g, '\n')
-    .slice(0, NOTE_MAX_LENGTH);
+export function normalizeComment(comment: string): string {
+  return comment.trim().replace(/\r\n/g, '\n').slice(0, COMMENT_MAX_LENGTH);
 }
 
 /**
@@ -288,20 +305,20 @@ export function normalizeNote(note: string): string {
 export function buildCopyPayload(
   event: ApiEvent,
   label: CalendarLabel,
-  responseStatus: string,
-  note: string
+  owner: OwnerResponse,
+  rsvpUrl: string
 ): ApiEvent {
   const meetUrl = getMeetUrl(event);
-  const mark = RESPONSE_MARKS[responseStatus];
+  const mark = RESPONSE_MARKS[owner.status];
   const payload: ApiEvent = {
     summary: `[${label.label}] ${mark ? `${mark} ` : ''}${event.summary || UNTITLED_EVENT_TITLE}`,
-    description: replaceNoteSection(buildCopyDescription(event, meetUrl), note),
+    description: buildCopyDescription(event, meetUrl, owner, rsvpUrl),
     location: joinLocation(event.location, meetUrl),
     start: event.start,
     end: event.end,
     visibility: event.visibility ?? 'default',
-    // 欠席した予定は空き時間として見せる（一覧には残して取り消しできるようにする）
-    transparency: responseStatus === 'declined' ? 'transparent' : (event.transparency ?? 'opaque'),
+    // 欠席した予定は空き時間として見せる（コピーは残して出欠を取り消せるようにする）
+    transparency: owner.status === 'declined' ? 'transparent' : (event.transparency ?? 'opaque'),
     reminders: { useDefault: false, overrides: [] },
   };
 
@@ -316,12 +333,35 @@ export function buildCopyPayload(
  * コピー元カレンダーの所有者の出欠を取得
  * getMyStatus() は実行ユーザーの出欠を返すため、所有者アドレスとの一致で判定する
  */
-export function getOwnerResponseStatus(event: ApiEvent, sourceCalendarId: string): string {
+export function getOwnerResponse(event: ApiEvent, sourceCalendarId: string): OwnerResponse {
   const owner = sourceCalendarId.toLowerCase();
   const attendee = (event.attendees ?? []).find(
     (candidate) => candidate.email?.toLowerCase() === owner
   );
-  return attendee?.responseStatus ?? RESPONSE_NONE;
+
+  return {
+    status: attendee?.responseStatus ?? RESPONSE_NONE,
+    comment: attendee?.comment ?? '',
+  };
+}
+
+/**
+ * 出欠変更ページの URL を組み立てる
+ * 出欠を持たない予定にはリンクを載せない（開いても操作できないため）
+ */
+function buildRsvpUrl(
+  config: CopyConfig,
+  sourceCalendarId: string,
+  sourceEventId: string,
+  owner: OwnerResponse
+): string {
+  if (!config.rsvpWebAppUrl || owner.status === RESPONSE_NONE) return '';
+
+  const params = [
+    `c=${encodeURIComponent(sourceCalendarId)}`,
+    `e=${encodeURIComponent(sourceEventId)}`,
+  ];
+  return `${config.rsvpWebAppUrl}?${params.join('&')}`;
 }
 
 function toExistingCopy(event: ApiEvent): ExistingCopy | null {
@@ -337,8 +377,10 @@ function toExistingCopy(event: ApiEvent): ExistingCopy | null {
     sourceEventId: metadata.sourceEventId,
     sourceUpdated: metadata.sourceUpdated ?? '',
     responseStatus: metadata.responseStatus ?? '',
+    responseComment: metadata.responseComment ?? '',
+    pendingAt: metadata.pendingAt ?? '',
     pendingResponse: metadata.pendingResponse ?? '',
-    note: metadata.note ?? '',
+    pendingComment: metadata.pendingComment ?? '',
     responseError: metadata.responseError ?? '',
     metadata,
   };
@@ -348,14 +390,15 @@ function buildCopyMetadata(
   sourceCalendarId: string,
   sourceEventId: string,
   sourceUpdated: string,
-  responseStatus: string
+  owner: OwnerResponse
 ): CopyMetadata {
   return {
     isCopy: COPY_MARKER_VALUE,
     sourceCalendarId,
     sourceEventId,
     sourceUpdated,
-    responseStatus,
+    responseStatus: owner.status,
+    responseComment: owner.comment,
   };
 }
 
@@ -368,8 +411,15 @@ function isCopyable(event: ApiEvent): boolean {
   return !EXCLUDED_PREFIXES.some((prefix) => title.startsWith(prefix));
 }
 
-function buildCopyDescription(event: ApiEvent, meetUrl: string | undefined): string {
+function buildCopyDescription(
+  event: ApiEvent,
+  meetUrl: string | undefined,
+  owner: OwnerResponse,
+  rsvpUrl: string
+): string {
   const sections: string[] = [];
+
+  if (owner.comment) sections.push(`${COMMENT_SECTION_HEADING}\n${owner.comment}`);
 
   const body = event.description?.trim();
   if (body) sections.push(body);
@@ -380,6 +430,7 @@ function buildCopyDescription(event: ApiEvent, meetUrl: string | undefined): str
   }
 
   if (meetUrl) sections.push(`${MEET_SECTION_HEADING}\n${meetUrl}`);
+  if (rsvpUrl) sections.push(`${RSVP_SECTION_HEADING}\n${rsvpUrl}`);
 
   return sections.join(SECTION_SEPARATOR);
 }

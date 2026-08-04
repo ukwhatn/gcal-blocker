@@ -73,6 +73,7 @@ export interface CopyConfig {
   targetCalendarId: string;
   sourceCalendarIds: string[];
   labels: Record<string, CalendarLabel>;
+  rsvpWebAppUrl: string;
 }
 
 /**
@@ -94,6 +95,7 @@ export interface CopyMetadata {
   sourceEventId: string;
   sourceUpdated: string;
   responseStatus: string;
+  responseComment: string;
 }
 
 /**
@@ -106,11 +108,13 @@ export interface CopyCandidate {
   sourceEventId: string;
   sourceUpdated: string;
   responseStatus: string;
+  responseComment: string;
   payload: GoogleAppsScript.Calendar.Schema.Event;
 }
 
 /**
  * コピー先に存在するコピーイベント
+ * response* は元イベントから読んだ現在値、pending* はウェブアプリからの未反映の入力。
  * metadata は extendedProperties.private の生の内容（patch 時のマージ元）
  */
 export interface ExistingCopy {
@@ -119,8 +123,10 @@ export interface ExistingCopy {
   sourceEventId: string;
   sourceUpdated: string;
   responseStatus: string;
+  responseComment: string;
+  pendingAt: string;
   pendingResponse: string;
-  note: string;
+  pendingComment: string;
   responseError: string;
   metadata: Record<string, string>;
 }
@@ -137,32 +143,33 @@ export interface CopyResult {
 }
 
 /**
- * Web App が表示する 1 予定
+ * ウェブアプリが表示する 1 予定の状態
+ * pending* が入っているときは、まだ元カレンダーへ反映されていない
  */
-export interface AgendaItem {
-  eventId: string;
+export interface RsvpView {
+  sourceCalendarId: string;
+  sourceEventId: string;
   title: string;
-  sortKey: string; // 開始日時（終日は yyyy-MM-dd、時刻ありは ISO8601）
-  dateKey: string; // yyyy-MM-dd（日付グルーピング用）
   dateLabel: string;
   timeLabel: string;
-  isAllDay: boolean;
-  sourceCalendarId: string;
   location: string;
   detail: string;
   responseStatus: string;
+  responseComment: string;
   pendingResponse: string;
-  note: string;
+  pendingComment: string;
   responseError: string;
   canRespond: boolean;
+  appliesImmediately: boolean; // 自プロジェクト担当なら送信と同時に反映される
 }
 
 /**
- * Web App からの入力
- * 未指定のフィールドは「変更しない」を意味する（出欠だけ・メモだけの更新を許すため）
+ * ウェブアプリからの入力
+ * 出欠とコメントは常にセットで送る（画面に現在値が入っているため、片方だけの更新を扱わない）
  */
 export interface RsvpSubmission {
-  eventId: string;
-  response?: RsvpResponse;
-  note?: string;
+  sourceCalendarId: string;
+  sourceEventId: string;
+  response: RsvpResponse;
+  comment: string;
 }
