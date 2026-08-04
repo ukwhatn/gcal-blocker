@@ -1,4 +1,4 @@
-import { CalendarConfig, CalendarLabel, CopyConfig, SyncPeriod } from './types';
+import { CalendarConfig, CalendarLabel, CopyConfig, RsvpResponse, SyncPeriod } from './types';
 
 /** ブロックイベントのタイトル */
 export const BLOCK_TITLE = '予定あり(自動ブロック)';
@@ -18,6 +18,32 @@ export const COPY_MARKER_VALUE = 'true';
 
 /** タイトルが空のイベントをコピーする際の代替タイトル */
 export const UNTITLED_EVENT_TITLE = '(無題)';
+
+/** Web App が予定一覧に表示する日数 */
+const AGENDA_DAYS = 14;
+
+/** 元イベントに自分の出欠エントリがない（出欠の概念がない）予定を表す responseStatus */
+export const RESPONSE_NONE = 'none';
+
+/**
+ * コピーのタイトルに付ける出欠マーク
+ * accepted と RESPONSE_NONE には付けない（大半の予定が該当し、付けると識別に役立たないため）
+ */
+export const RESPONSE_MARKS: Record<string, string> = {
+  declined: '❌',
+  tentative: '△',
+  needsAction: '？',
+};
+
+/** メモの最大文字数（extendedProperties.private の 1 値あたり上限に対する安全マージン） */
+export const NOTE_MAX_LENGTH = 900;
+
+/**
+ * 外部（Web App の入力・保存済みメタ）から受け取った文字列を出欠として解釈する
+ */
+export function toRsvpResponse(value: string | undefined): RsvpResponse | null {
+  return value === 'accepted' || value === 'tentative' || value === 'declined' ? value : null;
+}
 
 /**
  * 登録可能ラベルの判定で読み飛ばす第2レベル接尾辞
@@ -65,6 +91,18 @@ export function getSyncPeriod(): SyncPeriod {
  */
 export function getCopyPeriod(): SyncPeriod {
   return buildPeriodFromNow(COPY_MONTHS);
+}
+
+/**
+ * Web App の予定一覧が対象とする期間
+ * 開始済みの当日分も残すため、現在時刻ではなく当日 0 時から始める
+ */
+export function getAgendaPeriod(): SyncPeriod {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + AGENDA_DAYS);
+  return { start, end };
 }
 
 function buildPeriodFromNow(months: number): SyncPeriod {

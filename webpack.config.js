@@ -1,5 +1,6 @@
 const path = require("path");
 const GasPlugin = require("gas-webpack-plugin");
+const CopyPlugin = require("copy-webpack-plugin");
 
 module.exports = {
     entry: './src/index.ts',
@@ -33,6 +34,10 @@ module.exports = {
     plugins: [
         new GasPlugin({
             autoGlobalExportsFiles: ['**/index.ts'],
+        }),
+        // ウェブアプリのHTMLはバンドルできないため、claspがpushする形でdistへ配置する
+        new CopyPlugin({
+            patterns: [{from: 'src/ui', to: '.'}],
         }),
     ],
 };

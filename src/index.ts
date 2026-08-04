@@ -8,6 +8,8 @@
 
 import { runSync, clearAllBlockEvents, clearOutOfRangeBlockEvents } from './sync-engine';
 import { runCopy, clearAllCopyEvents, clearOutOfRangeCopyEvents } from './copy-engine';
+import { loadAgenda, renderAgendaPage, submitRsvp } from './rsvp-webapp';
+import { AgendaItem, RsvpSubmission } from './types';
 
 const MAIN_HANDLER = 'syncCalendarsMain';
 const SATELLITE_HANDLER = 'syncCalendarsSatellite';
@@ -55,7 +57,7 @@ export function copyEvents(): void {
   try {
     const result = runCopy();
     console.log(
-      `Copy completed: created=${result.created}, updated=${result.updated}, deleted=${result.deleted}, errors=${result.errors.length}`
+      `Copy completed: created=${result.created}, updated=${result.updated}, deleted=${result.deleted}, applied=${result.applied}, errors=${result.errors.length}`
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -63,6 +65,29 @@ export function copyEvents(): void {
   } finally {
     lock.releaseLock();
   }
+}
+
+// --- RSVP Web App（メインプロジェクトだけをウェブアプリとしてデプロイする）---
+
+/**
+ * 予定一覧ページ（ウェブアプリのエントリポイント）
+ */
+export function doGet(): GoogleAppsScript.HTML.HtmlOutput {
+  return renderAgendaPage();
+}
+
+/**
+ * 予定一覧を返す（google.script.run から呼ばれる）
+ */
+export function getAgenda(): AgendaItem[] {
+  return loadAgenda();
+}
+
+/**
+ * 出欠・メモを保存する（google.script.run から呼ばれる）
+ */
+export function submitResponse(submission: RsvpSubmission): AgendaItem {
+  return submitRsvp(submission);
 }
 
 /**

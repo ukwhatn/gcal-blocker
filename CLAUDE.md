@@ -64,8 +64,10 @@ src/
 ├── calendar-service.ts  # CalendarApp 操作、外部系統判定、origin引き継ぎ
 ├── block-manager.ts     # カレンダーペア間の差分検出・適用、clear
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
-├── copy-service.ts      # Calendar API v3 操作、コピー対象判定、コピー内容の組み立て
-├── copy-engine.ts       # コピーの作成/更新/削除のオーケストレーション
+├── copy-service.ts      # Calendar API v3 操作、コピー対象判定、コピー内容の組み立て、出欠の反映
+├── copy-engine.ts       # コピーの作成/更新/削除・出欠入力の消費のオーケストレーション
+├── rsvp-webapp.ts       # 出欠入力ウェブアプリのサーバ側（一覧取得・入力保存）
+├── ui/agenda.html       # 出欠入力ウェブアプリの画面（ビルドで dist/ へコピー）
 └── index.ts             # グローバル関数エクスポート
 ```
 
@@ -84,6 +86,8 @@ src/
 | `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15分トリガの登録・削除（sync トリガとは独立） |
 | `clearAllCopies()` | 自プロジェクト担当のコピーを全削除（他プロジェクト担当は保護） |
 | `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピー削除 |
+| `doGet()` | 出欠入力ウェブアプリ（メインのみデプロイ） |
+| `getAgenda()` / `submitResponse()` | ウェブアプリのクライアントから `google.script.run` 経由で呼ばれる |
 
 ## イベントコピー機能
 
@@ -94,7 +98,19 @@ src/
 - **削除責任分離**: 作成・更新・削除はすべて自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみが対象
 - コピー先カレンダーは `CALENDAR_IDS` に含めてはならない（`getCopyConfig()` が検証してエラーにする）
 - ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
-- 更新は `Event.updated` と保存済み `sourceUpdated` の比較で差分 patch
+- 更新は `Event.updated` と保存済み `sourceUpdated` の比較、および出欠の変化で差分 patch
+
+## 出欠入力（ウェブアプリ）
+
+集約カレンダーから出欠とメモを入力する画面。**メインだけ**をウェブアプリとしてデプロイする（`dist/appsscript.json` の `webapp` は `access: MYSELF` / `executeAs: USER_DEPLOYING`）。
+
+- Calendar API は RSVP の変更に「そのカレンダーへの書き込み権限」を要求するため、CalD の予定はメインから直接書けない。入力をコピーの `pendingResponse` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを反映する**（メイン担当分は `submitResponse` 内で即時反映）
+- 元イベントへの書き込みは attendees 配列ごと patch する（自分のエントリだけを差し替える。配列を部分送信すると他のゲストが消える）
+- メモは集約カレンダー側のみ（description の `# メモ` セクション ＋ `note` メタ）。元カレンダーには書かない
+- コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` だけ
+- `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
+- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ウェブアプリから取り消せるようにするため）
+- **ウェブアプリはコード push だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
 
 ### スクリプトプロパティ
 
@@ -106,7 +122,9 @@ src/
 
 ### メタデータ設計
 
-ブロックイベントの description に JSON 形式でメタデータを埋め込む。
+コピーイベントのメタは `extendedProperties.private`（Calendar API v3）。コピー同期が書く 5 キーに加え、ウェブアプリが `pendingResponse` / `pendingResponseAt` / `note` を、反映処理が `responseError` を書く。Calendar API は値を削除できないため、消費済みの入力は空文字で消す。
+
+ブロックイベントの description には JSON 形式でメタデータを埋め込む。
 
 ```json
 {

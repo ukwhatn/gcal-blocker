@@ -5,7 +5,7 @@ Google Calendar の複数カレンダー間で予定を相互ブロックする 
 「Cal-A に予定が入っていたら、Cal-B/C/D にも『予定あり(自動ブロック)』を入れて他者からの招待を弾く」用途。
 出欠ステータス・「予定なし」設定・除外プレフィックスを尊重し、メタデータベースで作成/削除を冪等に追跡する。
 
-相互ブロックとは別に、**全プロジェクト共通の 1 カレンダーへ予定の中身をコピーする機能**を持つ（[イベントコピー機能](#イベントコピー機能)）。どの環境からでも全カレンダーの予定をタイトル・description つきで一覧できる。
+相互ブロックとは別に、**全プロジェクト共通の 1 カレンダーへ予定の中身をコピーする機能**を持つ（[イベントコピー機能](#イベントコピー機能)）。どの環境からでも全カレンダーの予定をタイトル・description つきで一覧でき、[ウェブアプリ](#出欠入力ウェブアプリ)から出欠とメモを入力して元カレンダーへ反映できる。
 
 ## ブロック構成パターン
 
@@ -79,6 +79,8 @@ bun run deploy:satellite
 
 `deploy:*` は内部で `.clasp-{main,satellite}.json` を `.clasp.json` にコピーしてから `clasp push` する。`.clasp.json` は gitignore。
 
+**ウェブアプリ（出欠入力）を更新したときは push だけでは反映されない。** メインの GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」を選んで再デプロイする（[出欠入力](#出欠入力ウェブアプリ)）。
+
 ## 初回セットアップ
 
 ### メインプロジェクト
@@ -115,11 +117,12 @@ bun run deploy:satellite
 | 項目 | 値 |
 |------|-----|
 | タイトル | `[LABEL] 元タイトル`（LABEL は `CALENDAR_LABELS`、未設定時はドメインから導出） |
-| description | 元 description ＋ `# ゲスト`（アドレス列挙）＋ `# Meet`（URL） |
+| 出欠マーク | タイトルの LABEL の後に付与。欠席 `❌` / 未定 `△` / 未応答 `？`（参加・出欠なしは付けない） |
+| description | `# メモ`（[ウェブアプリ](#出欠入力ウェブアプリ)の入力）＋ 元 description ＋ `# ゲスト`（アドレス列挙）＋ `# Meet`（URL） |
 | location | 元 location と Meet URL |
 | 開始/終了 | 元と同一（終日は終日イベント） |
 | 公開設定 | 元と同一（default / public / private） |
-| 予定の有無 | 元と同一（opaque / transparent） |
+| 予定の有無 | 元と同一（opaque / transparent）。欠席した予定は `transparent` |
 | 色 | `CALENDAR_LABELS` で指定した colorId（1〜11） |
 | ゲスト | **設定しない**（実在の相手に招待メールが飛ぶため description の列挙に留める） |
 | 通知 | なし（`useDefault=false`） |
@@ -130,17 +133,49 @@ bun run deploy:satellite
 
 ### コピー対象外
 
-自動ブロックイベント / Tasks・誕生日等の非 DEFAULT イベント / `EXCLUDED_PREFIXES` で始まるタイトル / 所有者が欠席（declined）した予定 / キャンセル済み予定。
+自動ブロックイベント / Tasks・誕生日等の非 DEFAULT イベント / `EXCLUDED_PREFIXES` で始まるタイトル / キャンセル済み予定。
 
-「予定なし（transparent）」の予定・終日予定・未応答の招待はコピーする。
+「予定なし（transparent）」の予定・終日予定・未応答の招待はコピーする。**欠席（declined）した予定もコピーする**（ウェブアプリから出欠を取り消せるようにするため。タイトルに `❌` を付け、`transparent` で空き時間として扱う）。
 
 ### 更新と削除
 
-コピーには `extendedProperties.private` に `sourceCalendarId` / `sourceEventId` / `sourceUpdated` を持たせ、元イベントの `updated` と比較して変化したときだけ patch する。元イベントが削除・欠席化・除外対象化されたコピーは削除する。
+コピーには `extendedProperties.private` に `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` を持たせ、元イベントの `updated` か出欠が変化したときだけ patch する。元イベントが削除・除外対象化されたコピーは削除する。
+
+patch ではウェブアプリが書いたキー（`pendingResponse` / `note` 等）を既存メタから引き継ぐ。コピー同期側が書くのは上記 4 キーだけで、入力を上書きしない。
 
 コピー元の一覧取得に失敗したカレンダーは、そのカレンダー由来のコピーを削除対象から除外する（一時エラーでの全消しを防ぐ）。
 
 削除は自プロジェクト担当分に限られるため、`COPY_SOURCE_IDS` からカレンダーを外すと、そのカレンダーのコピーは残る。掃除するには一度 `COPY_SOURCE_IDS` に戻して `clearAllCopies()` を実行する。
+
+### 出欠入力（ウェブアプリ）
+
+集約カレンダーを見ながら出欠とメモを入力する画面を、**メインプロジェクトだけ**ウェブアプリとして公開する。
+
+```
+doGet ──> 予定一覧（14 日分・日付順・モバイル前提）
+            ├─ 参加 / 未定 / 欠席 ボタン
+            └─ メモ欄（集約カレンダーにだけ保存）
+```
+
+出欠は元カレンダーの自分の attendee エントリへ書き込む。Calendar API は RSVP の変更に **そのカレンダーへの書き込み権限**を要求する（[公式](https://developers.google.com/workspace/calendar/api/concepts/inviting-attendees-to-events)）ため、CalD の予定をメイン（CalA アカウント）から直接書くことはできない。そこで入力はいったんコピーの `extendedProperties.private.pendingResponse` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを拾って反映する**。
+
+- メイン担当（CalA/B/C）の予定: 入力と同時に反映（ラグなし）
+- サテライト担当（CalD）の予定: 次のコピートリガで反映（最大 15 分）。それまで一覧に「反映待ち」バッジが出る
+
+反映できない予定（自分がゲストとして登録されていない・元が削除済み）は理由を `responseError` に残し、一覧にエラーとして表示する。
+
+メモは集約カレンダーのコピーにだけ保存する（description の `# メモ` セクションと `note` メタ）。元カレンダーには書かない。他人主催の予定では書き換えが主催者側マスターに戻され、自分主催の予定では全ゲストに見えてしまうため。
+
+コピー同期とウェブアプリが同じコピーを同時に patch すると入力が失われるため、`submitResponse` は `copyEvents` と同じ ScriptLock を取る（最大 10 秒待って取れなければ再試行を促す）。
+
+#### セットアップ（メインのみ）
+
+1. `bun run deploy:main` で push する
+2. GAS エディタで「デプロイ > 新しいデプロイ > 種類: ウェブアプリ」を選び、**アクセスできるユーザー: 自分のみ / 実行ユーザー: 自分**でデプロイする（`dist/appsscript.json` の `webapp` と同値）
+3. 発行された `/exec` URL をブックマークする
+4. コード更新時は `bun run deploy:main` のあと「デプロイを管理 > 編集 > バージョン: 新バージョン」で再デプロイする
+
+画面の HTML は `src/ui/agenda.html`。ビルドで `dist/agenda.html` へコピーされ、clasp が push する（`dist/` は gitignore なのでコミットしない）。
 
 ### 共有時の注意
 
@@ -153,6 +188,7 @@ bun run deploy:satellite
 3. `bun run deploy:*` で Advanced Calendar Service を含むマニフェストを push する
 4. GAS エディタで `copyEvents()` を 1 回手動実行し、Advanced Service の認可を通す
 5. `setupCopyTrigger()` を 1 回手動実行してトリガを登録する
+6. 出欠入力を使う場合は、メインでウェブアプリをデプロイする（[出欠入力（ウェブアプリ）](#出欠入力ウェブアプリ)）
 
 ## マイグレーション（既存環境からの移行）
 
@@ -181,6 +217,8 @@ bun run deploy:satellite
 | `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15 分トリガの登録・削除 |
 | `clearAllCopies()` | 自プロジェクト担当のコピーを全削除 |
 | `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピーを削除 |
+| `doGet()` | 出欠入力ウェブアプリのエントリポイント（メインのみデプロイ） |
+| `getAgenda()` / `submitResponse()` | ウェブアプリのクライアントから `google.script.run` 経由で呼ばれる（手動実行しない） |
 
 ## 設定
 
