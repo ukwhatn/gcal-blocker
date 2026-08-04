@@ -161,7 +161,7 @@ patch ではウェブアプリが書いたキー（`pendingResponse` / `note` �
       └─ [更新する]
 ```
 
-リンクは `?c=<コピー元カレンダー ID>&e=<コピー元イベント ID>` で組む。コピー先の event ID は insert のレスポンスを待たないと決まらず、リンクを description に書くために作成直後もう一度 patch する必要が出るため、コピー元の識別子を使う。ページ側は `privateExtendedProperty` で該当コピーを引く。
+リンクは `?cal=<コピー元カレンダー ID>&ev=<コピー元イベント ID>` で組む。パラメータ名に `c` は使えない（`c` と `sid` は [Apps Script の予約名](https://developers.google.com/apps-script/guides/web)で、使うとリクエストが `doGet` に届かず HTTP 405「Sorry, the file you have requested does not exist.」になる）。コピー先の event ID は insert のレスポンスを待たないと決まらず、リンクを description に書くために作成直後もう一度 patch する必要が出るため、コピー元の識別子を使う。ページ側は `privateExtendedProperty` で該当コピーを引く。
 
 #### 反映の経路
 
@@ -226,7 +226,7 @@ patch ではウェブアプリが書いたキー（`pendingResponse` / `note` �
 | `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15 分トリガの登録・削除 |
 | `clearAllCopies()` | 自プロジェクト担当のコピーを全削除 |
 | `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピーを削除 |
-| `doGet(e)` | 出欠変更ページ（メインのみデプロイ。`?c=<コピー元カレンダー>&e=<コピー元イベント>`） |
+| `doGet(e)` | 出欠変更ページ（メインのみデプロイ。`?cal=<コピー元カレンダー>&ev=<コピー元イベント>`） |
 | `submitResponse()` | ページのクライアントから `google.script.run` 経由で呼ばれる（手動実行しない） |
 
 ## 設定

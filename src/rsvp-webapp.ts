@@ -3,6 +3,8 @@ import { RESPONSE_NONE, getCopyConfig, toRsvpResponse } from './config';
 import {
   COMMENT_SECTION_HEADING,
   CopySnapshot,
+  RSVP_CALENDAR_PARAM,
+  RSVP_EVENT_PARAM,
   RSVP_SECTION_HEADING,
   findCopyBySource,
   normalizeComment,
@@ -81,8 +83,8 @@ export function submitRsvp(submission: RsvpSubmission): RsvpView {
 function buildInitialState(
   request: GoogleAppsScript.Events.DoGet | undefined
 ): { view: RsvpView } | { error: string } {
-  const sourceCalendarId = request?.parameter?.c ?? '';
-  const sourceEventId = request?.parameter?.e ?? '';
+  const sourceCalendarId = request?.parameter?.[RSVP_CALENDAR_PARAM] ?? '';
+  const sourceEventId = request?.parameter?.[RSVP_EVENT_PARAM] ?? '';
 
   if (!sourceCalendarId || !sourceEventId) {
     return { error: '予定が指定されていません。集約カレンダーの予定にある出欠変更リンクから開いてください' };

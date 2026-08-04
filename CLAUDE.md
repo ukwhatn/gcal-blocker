@@ -86,7 +86,7 @@ src/
 | `setupCopyTrigger()` / `removeCopyTrigger()` | コピー用 15分トリガの登録・削除（sync トリガとは独立） |
 | `clearAllCopies()` | 自プロジェクト担当のコピーを全削除（他プロジェクト担当は保護） |
 | `clearOutOfRangeCopies()` | 同期対象期間外に取り残されたコピー削除 |
-| `doGet(e)` | 出欠変更ページ（メインのみデプロイ。`?c=<コピー元カレンダー>&e=<コピー元イベント>`） |
+| `doGet(e)` | 出欠変更ページ（メインのみデプロイ。`?cal=<コピー元カレンダー>&ev=<コピー元イベント>`） |
 | `submitResponse()` | ページのクライアントから `google.script.run` 経由で呼ばれる |
 
 ## イベントコピー機能
@@ -104,7 +104,8 @@ src/
 
 集約カレンダーのコピーの description に載せたリンクから、その 1 件の出欠と返信メモを変更する画面。一覧は持たない（カレンダーの下位互換になるため）。**メインだけ**をウェブアプリとしてデプロイする（`dist/appsscript.json` の `webapp` は `access: MYSELF` / `executeAs: USER_DEPLOYING`）。
 
-- リンクは `?c=<コピー元カレンダー>&e=<コピー元イベント>`。**コピー先の event ID は使わない** — insert のレスポンスを待たないと決まらず、リンクを書くために作成直後もう一度 patch する必要が出るため。ページ側は `privateExtendedProperty` でコピーを引く
+- リンクは `?cal=<コピー元カレンダー>&ev=<コピー元イベント>`。**コピー先の event ID は使わない** — insert のレスポンスを待たないと決まらず、リンクを書くために作成直後もう一度 patch する必要が出るため。ページ側は `privateExtendedProperty` でコピーを引く
+- **パラメータ名に `c` / `sid` を使わない**（Apps Script の予約名。使うとリクエストが `doGet` に届かず HTTP 405 になる。[公式](https://developers.google.com/apps-script/guides/web)）
 - リンクの URL はスクリプトプロパティ `RSVP_WEB_APP_URL` から取る。サテライトも同じリンクを description に書くため、`ScriptApp.getService().getUrl()` は使えない（自分自身の URL を書いてしまう）
 - Calendar API は RSVP の変更に「そのカレンダーへの書き込み権限」を要求するため、CalD の予定はメインから直接書けない。入力をコピーの `pendingAt` / `pendingResponse` / `pendingComment` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを反映する**（メイン担当分は `submitResponse` 内で即時反映）
 - 元イベントへの書き込みは attendees 配列ごと patch する（自分のエントリだけを差し替える。配列を部分送信すると他のゲストが消える）。反映結果は patch のレスポンスから読み直して保存する

@@ -35,6 +35,15 @@ export const COMMENT_SECTION_HEADING = '# 返信メモ';
 export const RSVP_SECTION_HEADING = '# 出欠変更';
 
 /**
+ * 出欠変更ページのクエリパラメータ名
+ * `c` と `sid` は Apps Script の予約名で、使うとリクエストが doGet に届かず
+ * HTTP 405「Sorry, the file you have requested does not exist.」になる
+ * https://developers.google.com/apps-script/guides/web
+ */
+export const RSVP_CALENDAR_PARAM = 'cal';
+export const RSVP_EVENT_PARAM = 'ev';
+
+/**
  * 元イベントに記録されている自分の出欠
  */
 export interface OwnerResponse {
@@ -358,8 +367,8 @@ function buildRsvpUrl(
   if (!config.rsvpWebAppUrl || owner.status === RESPONSE_NONE) return '';
 
   const params = [
-    `c=${encodeURIComponent(sourceCalendarId)}`,
-    `e=${encodeURIComponent(sourceEventId)}`,
+    `${RSVP_CALENDAR_PARAM}=${encodeURIComponent(sourceCalendarId)}`,
+    `${RSVP_EVENT_PARAM}=${encodeURIComponent(sourceEventId)}`,
   ];
   return `${config.rsvpWebAppUrl}?${params.join('&')}`;
 }
