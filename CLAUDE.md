@@ -61,6 +61,7 @@ bun run deploy:satellite
 src/
 ├── types.ts             # BlockMetadata/BlockCandidate/CopyCandidate/SyncResult 等の型定義
 ├── config.ts            # スクリプトプロパティ読み込み、同期期間、ラベル導出
+├── calendar-api.ts      # Calendar API v3 の共通処理（一覧取得・カレンダー所有者の出欠）
 ├── calendar-service.ts  # CalendarApp 操作、外部系統判定、origin引き継ぎ
 ├── block-manager.ts     # カレンダーペア間の差分検出・適用、clear
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
@@ -112,7 +113,7 @@ src/
 - **返信メモは `attendees[].comment`** なので主催者と他ゲストに見える。集約カレンダー側には description の `# 返信メモ` として出る
 - コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` だけ
 - `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
-- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）
+- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）。Meet URL は location・description とも載せない（Raycast 等の会議自動起動が誤って開くため）
 - **ウェブアプリはコード push だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
 
 ### スクリプトプロパティ
@@ -145,6 +146,7 @@ src/
 
 - 読み取りは 1 カレンダー 1 回（`readCalendarSnapshot`）。ペアごとに読み直さず、作成・削除でターゲットの索引を更新しながらメモリ上で差分を解く
 - 内部系統判定: `direct sourceCalendarId ∈ 自スクリプトの CALENDAR_IDS` なら除外（無限ループ防止）
+- 出欠フィルタはカレンダー所有者の出欠を Calendar API v3 の attendees から読む（`readCalendarSnapshot` の `declinedEventKeys`）。**`getMyStatus()` は使わない** — 実行ユーザーの出欠を返し、実行ユーザーが予定の owner なら常に `OWNER` になるため、別アカウントのカレンダーで自分が主催する予定を欠席しても除外されない。ブロック同期も Advanced Calendar Service に依存する
 - キー生成: origin ベース（A→B 直接と A→B→D 経由が同じキーで重複検知）
 - 削除責任分離: 各 sync ペアは `direct source` 一致のブロックのみ削除
 
