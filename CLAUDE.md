@@ -4,11 +4,11 @@
 
 Google Calendar の複数カレンダー間でブロックイベントを相互に同期するGAS。
 加えて、全プロジェクト共通の 1 カレンダーへ予定の中身をコピーする機能を持つ。
-TypeScript + webpack + clasp によるモダンな GAS 開発環境で構築。
+TypeScript + webpack で構築し、gws MCP の認証で Apps Script API を叩いてデプロイする。
 
 ## 技術スタック
 
-- TypeScript + webpack + clasp
+- TypeScript + webpack
 - Google Apps Script
 - bun（パッケージマネージャー）
 
@@ -29,17 +29,14 @@ bun run deploy:satellite   # サテライトGASプロジェクト（CalDアカ�
 **ローカル手動デプロイ運用**。IP 制限により GitHub Actions から GAS API を叩けないため、CI/CD は採用していない。
 
 ```bash
-# メインへのデプロイ（CalA アカウント）
-clasp login --status            # 現在のログインアカウント確認
-# 必要なら: clasp logout && clasp login で CalA に切替
-bun run deploy:main
-
-# サテライトへのデプロイ（CalD アカウント）
-clasp logout && clasp login     # CalD に切替（メイン後に必須）
-bun run deploy:satellite
+bun run deploy:main        # ビルドしてメイン（CalA）へ反映
+bun run deploy:satellite   # ビルドしてサテライト（CalD）へ反映
 ```
 
-`bun run deploy:*` 以外のデプロイコマンド（`clasp push` 直接実行等）は誤デプロイ防止のため使用禁止。
+- **clasp は使わない**（廃止）。`scripts/deploy.ts` が gws MCP（`~/.claude/mcp/google-workspace`）の OAuth トークンで Apps Script API の `projects.updateContent` を叩き、プロジェクトのファイルを `dist/` の内容で全置換する
+- scriptId は `deploy.json`、どのアカウントで叩くか（gws MCP の `account_id`、別マシンなら `ssh` の接続先）は main checkout 直下の `deploy.local.json`（gitignore、マシンごと）
+- 反映前の内容は main checkout の `.local/deploy-backups/` に保存される
+- `bun run deploy:*` 以外の経路（Apps Script API の直叩き、gws MCP の `script_update_project_content` 等）でのデプロイは誤デプロイ防止のため使用禁止
 
 ## アーキテクチャ
 
@@ -114,7 +111,7 @@ src/
 - コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` だけ
 - `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
 - 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）。Meet URL は location・description とも載せない（Raycast 等の会議自動起動が誤って開くため）
-- **ウェブアプリはコード push だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
+- **ウェブアプリは `deploy:main` だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
 
 ### スクリプトプロパティ
 
@@ -154,8 +151,8 @@ src/
 
 ### メインプロジェクト
 1. CalA アカウントで GAS プロジェクト作成 → scriptId 取得
-2. `.clasp-main.json` に scriptId を記載してコミット
-3. CalA アカウントで `clasp login`
+2. `deploy.json` の `main.scriptId` に記載してコミット
+3. gws MCP に CalA アカウントを登録し、`deploy.local.json` の `main.account` に書く
 4. `bun run deploy:main`
 5. GAS エディタでスクリプトプロパティ `CALENDAR_IDS=<CalA>,<CalB>,<CalC>` を設定
 6. CalB/C のカレンダー設定で CalA に「予定の表示と変更」権限を付与
@@ -163,9 +160,9 @@ src/
 
 ### サテライトプロジェクト
 1. CalD アカウントで GAS プロジェクト作成 → scriptId 取得
-2. `.clasp-satellite.json` の scriptId placeholder を実値に置換してコミット
+2. `deploy.json` の `satellite.scriptId` に記載してコミット
 3. CalD のカレンダー設定で CalB を「予定の表示と変更」権限で共有
-4. `clasp logout && clasp login` で CalD アカウント認証
+4. gws MCP に CalD アカウントを登録し、`deploy.local.json` の `satellite.account`（トークンが別マシンなら `ssh` も）に書く
 5. `bun run deploy:satellite`
 6. GAS エディタでスクリプトプロパティ `CALENDAR_IDS=<CalB の ID>,<CalD の ID>` を設定
 7. `setupTriggerSatellite()` を 1 回手動実行
@@ -174,7 +171,7 @@ src/
 ### イベントコピー（全プロジェクト共通）
 1. コピー先カレンダーを作成し、他プロジェクトの実行アカウントに「予定の表示と変更」権限で共有
 2. スクリプトプロパティ `COPY_TARGET_CALENDAR_ID` / `COPY_SOURCE_IDS` / `CALENDAR_LABELS` を設定
-3. `bun run deploy:*` で Advanced Calendar Service 入りのマニフェストを push
+3. `bun run deploy:*` で Advanced Calendar Service 入りのマニフェストを反映
 4. `copyEvents()` を 1 回手動実行して Advanced Service の認可を通し、ログで created 件数を確認
 5. `setupCopyTrigger()` を 1 回手動実行
 
@@ -186,4 +183,3 @@ src/
 
 - GAS環境ではES Modulesが使えないため、webpackでバンドルが必要
 - webpackはdevelopmentモードを使用（productionモードはgas-webpack-pluginと競合）
-- `clasp` は `~/.clasprc.json` を単一参照する。メイン⇔サテライト切替時は `clasp logout && clasp login` が必要

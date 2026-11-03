@@ -35,7 +35,7 @@ module.exports = {
         new GasPlugin({
             autoGlobalExportsFiles: ['**/index.ts'],
         }),
-        // ウェブアプリのHTMLはバンドルできないため、claspがpushする形でdistへ配置する
+        // ウェブアプリのHTMLはバンドルできないため、deploy が dist ごと反映する形でdistへ配置する
         new CopyPlugin({
             patterns: [{from: 'src/ui', to: '.'}],
         }),
