@@ -44,8 +44,9 @@ CalA ←→ CalB ←→ CalC          CalB ←→ CalD
 
 ## ローカルに必要なもの
 
-- [Node.js](https://nodejs.org/) (clasp の内部で利用)
 - [Bun](https://bun.sh/)
+- [google-workspace-mcp](https://github.com/ukwhatn/google-workspace-mcp)（gws MCP）と、各 GAS プロジェクトのオーナーアカウントの認証。デプロイは gws MCP が保存している OAuth トークンで Apps Script API を叩く
+- [uv](https://docs.astral.sh/uv/)（gws MCP の Python 環境で deploy を動かす）
 
 ## 開発コマンド
 
@@ -64,29 +65,35 @@ bun run deploy:satellite    # サテライト GAS プロジェクトへデプロ
 
 **ローカル手動デプロイのみ**。IP 制限により GitHub Actions から GAS API を叩けないため、CI/CD は採用していない。
 
-`clasp` は `~/.clasprc.json` を単一参照するため、メイン/サテライトのアカウント切替時は `clasp logout && clasp login` が必要。
-
 ```bash
-# メインへのデプロイ
-clasp login --status            # 現在のアカウント確認
-# 必要なら: clasp logout && clasp login で CalA に切替
-bun run deploy:main
-
-# サテライトへのデプロイ
-clasp logout && clasp login     # CalD に切替
-bun run deploy:satellite
+bun run deploy:main         # ビルドしてメインへ反映
+bun run deploy:satellite    # ビルドしてサテライトへ反映
 ```
 
-`deploy:*` は内部で `.clasp-{main,satellite}.json` を `.clasp.json` にコピーしてから `clasp push` する。`.clasp.json` は gitignore。
+`deploy:*` はビルドのあと `scripts/deploy.ts` を実行し、Apps Script API の `projects.updateContent` で **GAS プロジェクトのファイルを `dist/` の内容で全置換する**。認証は gws MCP のトークンを使う（clasp は使わない）。
 
-**ウェブアプリ（出欠入力）を更新したときは push だけでは反映されない。** メインの GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」を選んで再デプロイする（[出欠入力](#出欠入力ウェブアプリ)）。
+- 反映先の scriptId は `deploy.json`（コミット済み）
+- どのアカウントで叩くかはマシンごとに違うので、main checkout 直下の `deploy.local.json`（gitignore）に書く（形式は下）
+  - `account` は gws MCP の `gws_auth_list_accounts` の `account_id`。GAS プロジェクトのオーナー（メインは CalA、サテライトは CalD）を指定する
+  - トークンが別マシンの gws MCP にしか無いアカウントは、`ssh` に接続先を書くとそのマシンで実行する
+  - gws MCP の場所が `~/.claude/mcp/google-workspace` でなければ `gwsDir` で指定する
+- 反映前のプロジェクトの内容を main checkout の `.local/deploy-backups/<target>-<時刻>.json` に保存する。戻すときはこのファイルの `files` を同じ API で書き戻す
+
+```json
+{
+  "main": { "account": "<gws MCP の account_id>" },
+  "satellite": { "account": "<gws MCP の account_id>", "ssh": "<ssh の接続先>" }
+}
+```
+
+**ウェブアプリ（出欠入力）を更新したときは `deploy:main` だけでは反映されない。** メインの GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」を選んで再デプロイする（[出欠入力](#出欠入力ウェブアプリ)）。
 
 ## 初回セットアップ
 
 ### メインプロジェクト
 1. CalA アカウントで GAS プロジェクト作成（[Apps Script Console](https://script.google.com/home)）→ scriptId 取得
-2. `.clasp-main.json` に scriptId を記載してコミット
-3. ローカルで `bun install` → `clasp login`（CalA アカウント）
+2. `deploy.json` の `main.scriptId` に記載してコミット
+3. ローカルで `bun install`。gws MCP に CalA アカウントを登録し、`deploy.local.json` の `main.account` に書く
 4. `bun run deploy:main`
 5. GAS エディタでスクリプトプロパティ `CALENDAR_IDS=<CalA>,<CalB>,<CalC>` を設定
 6. CalB/C のカレンダー設定で CalA に「予定の表示と変更」権限を付与
@@ -95,9 +102,9 @@ bun run deploy:satellite
 
 ### サテライトプロジェクト
 1. CalD アカウントで新規 GAS プロジェクト作成 → scriptId 取得
-2. `.clasp-satellite.json` の `REPLACE_WITH_CALD_SCRIPT_ID` を実値に置換してコミット
+2. `deploy.json` の `satellite.scriptId` に記載してコミット
 3. CalD のカレンダー設定で CalB を「予定の表示と変更」権限で共有
-4. ローカルで `clasp logout && clasp login`（CalD アカウントで認証）
+4. gws MCP に CalD アカウントを登録し、`deploy.local.json` の `satellite.account`（別マシンなら `ssh` も）に書く
 5. `bun run deploy:satellite`
 6. GAS エディタでスクリプトプロパティ `CALENDAR_IDS=<CalB の ID>,<CalD の ID>` を設定（**必須、未設定だとエラー**）
 7. GAS エディタで `setupTriggerSatellite()` を 1 回手動実行
@@ -178,13 +185,13 @@ patch ではウェブアプリが書いたキー（`pendingResponse` / `note` �
 
 #### セットアップ（メインのみ）
 
-1. `bun run deploy:main` で push する
+1. `bun run deploy:main` で反映する
 2. GAS エディタで「デプロイ > 新しいデプロイ > 種類: ウェブアプリ」を選び、**アクセスできるユーザー: 自分のみ / 実行ユーザー: 自分**でデプロイする（`dist/appsscript.json` の `webapp` と同値）
 3. 発行された `/exec` URL を、**全プロジェクト**のスクリプトプロパティ `RSVP_WEB_APP_URL` に設定する（サテライトの `copyEvents` も同じリンクを書くため。未設定ならリンクを載せないだけで他の動作には影響しない）
 4. `copyEvents()` を 1 回手動実行し、既存のコピーにリンクが入ることを確認する
 5. コード更新時は `bun run deploy:main` のあと「デプロイを管理 > 編集 > バージョン: 新バージョン」で再デプロイする
 
-画面の HTML は `src/ui/rsvp.html`。ビルドで `dist/rsvp.html` へコピーされ、clasp が push する（`dist/` は gitignore なのでコミットしない）。
+画面の HTML は `src/ui/rsvp.html`。ビルドで `dist/rsvp.html` へコピーされ、`deploy:*` が反映する（`dist/` は gitignore なのでコミットしない）。
 
 ### 共有時の注意
 
@@ -194,7 +201,7 @@ patch ではウェブアプリが書いたキー（`pendingResponse` / `note` �
 
 1. コピー先カレンダーを作成し、他プロジェクトの実行アカウントへ「予定の表示と変更」権限で共有する
 2. 各プロジェクトのスクリプトプロパティに `COPY_TARGET_CALENDAR_ID` / `COPY_SOURCE_IDS` / `CALENDAR_LABELS` を設定する
-3. `bun run deploy:*` で Advanced Calendar Service を含むマニフェストを push する
+3. `bun run deploy:*` で Advanced Calendar Service を含むマニフェストを反映する
 4. GAS エディタで `copyEvents()` を 1 回手動実行し、Advanced Service の認可を通す
 5. `setupCopyTrigger()` を 1 回手動実行してトリガを登録する
 6. 出欠入力を使う場合は、メインでウェブアプリをデプロイする（[出欠入力（ウェブアプリ）](#出欠入力ウェブアプリ)）
@@ -306,13 +313,13 @@ src/
 
 ```
 .
-├── dist/                       # ビルド後のファイル（clasp のプッシュ対象）
+├── dist/                       # ビルド後のファイル（deploy:* の反映対象）
 │   ├── appsscript.json         # GAS マニフェスト
 │   └── bundle.js               # webpack バンドル出力
+├── scripts/deploy.ts           # dist/ を GAS へ反映する（gws MCP の認証で Apps Script API を叩く）
 ├── src/                        # ソースコード
-├── .clasp-main.json            # メインプロジェクトの scriptId（コミット済み）
-├── .clasp-satellite.json       # サテライトプロジェクトの scriptId（コミット済み）
-├── .clasp.json                 # deploy:* 実行時に動的生成（gitignore）
+├── deploy.json                 # 各プロジェクトの scriptId（コミット済み）
+├── deploy.local.json           # マシンごとの反映アカウント（gitignore）
 ├── eslint.config.mjs
 ├── package.json
 ├── tsconfig.json

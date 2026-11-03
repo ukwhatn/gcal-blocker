@@ -4,14 +4,13 @@
     "build": "webpack",
     "build:watch": "webpack --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "deploy:main": "cp .clasp-main.json .clasp.json && bun run build && clasp push --force",
-    "deploy:satellite": "cp .clasp-satellite.json .clasp.json && bun run build && clasp push --force"
+    "lint": "eslint src/ scripts/",
+    "lint:fix": "eslint src/ scripts/ --fix",
+    "deploy:main": "bun run build && bun scripts/deploy.ts main",
+    "deploy:satellite": "bun run build && bun scripts/deploy.ts satellite"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
-    "@google/clasp": "^2.4.2",
     "@types/bun": "^1.1.0",
     "@types/google-apps-script": "^1.0.83",
     "copy-webpack-plugin": "^14.0.0",
