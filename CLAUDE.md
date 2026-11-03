@@ -96,6 +96,7 @@ src/
 - **削除責任分離**: 作成・更新・削除はすべて自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみが対象
 - コピー先カレンダーは `CALENDAR_IDS` に含めてはならない（`getCopyConfig()` が検証してエラーにする）
 - ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
+- 公開設定は、元が `public` のときだけ `public`、`default` と `private` は `private` で写す（`default` は共通カレンダーの共有権限に従い、詳細表示権限の相手に中身が見えるため）。更新判定でも visibility の差を見る
 - 更新判定は `Event.updated` / 出欠 / 返信メモの変化に加え、**組み立てた summary・description と現在のコピーの差**を見る（元イベントの updated だけだと、コピーの組み立て方を変えたときに既存コピーが更新されない）
 
 ## 出欠変更ページ（ウェブアプリ）

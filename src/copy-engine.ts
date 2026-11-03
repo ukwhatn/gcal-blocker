@@ -220,7 +220,8 @@ function needsPatch(current: ExistingCopy, candidate: CopyCandidate): boolean {
     current.responseStatus !== candidate.responseStatus ||
     current.responseComment !== candidate.responseComment ||
     current.summary !== (candidate.payload.summary ?? '') ||
-    current.description !== (candidate.payload.description ?? '')
+    current.description !== (candidate.payload.description ?? '') ||
+    current.visibility !== candidate.payload.visibility
   );
 }
 
