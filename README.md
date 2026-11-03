@@ -269,6 +269,7 @@ patch ではウェブアプリが書いたキー（`pendingResponse` / `note` �
 src/
 ├── types.ts             # BlockMetadata/BlockCandidate/CopyCandidate/SyncResult 等の型定義
 ├── config.ts            # スクリプトプロパティ読み込み、同期期間、ラベル導出
+├── calendar-api.ts      # Calendar API v3 の共通処理（一覧取得・カレンダー所有者の出欠）
 ├── calendar-service.ts  # CalendarApp 操作、外部系統判定、origin 引き継ぎ
 ├── block-manager.ts     # カレンダーペア間の差分検出・適用、clear
 ├── sync-engine.ts       # 全カレンダーペアのオーケストレーション
@@ -298,7 +299,8 @@ src/
 - **内部系統判定**: `direct sourceCalendarId ∈ 自スクリプトの CALENDAR_IDS` なら除外（無限ループ防止）
 - **キー生成**: origin ベース（A→B 直接と A→B→D 経由が同じキーで重複検知）
 - **削除責任分離**: 各 sync ペアは `direct source` 一致のブロックのみ削除
-- **外部自動ブロックの bypass**: 別アカウント実行時 `getMyStatus()` が不安定なため、外部系統の自動ブロックは出欠フィルタを通さず必ず candidate 化
+- **外部自動ブロックの bypass**: 外部系統の自動ブロックは出欠フィルタを通さず必ず candidate 化
+- **出欠フィルタ**: 通常イベントは、そのカレンダーの所有者（カレンダー ID と同じアドレスの attendee）が欠席したものだけ除外する。CalendarApp の `getMyStatus()` は実行ユーザーの出欠を返し、実行ユーザーが予定の owner なら常に `OWNER` になる（[公式](https://developers.google.com/apps-script/reference/calendar/calendar-event#getMyStatus())）ため使わない。所有者の出欠は Calendar API v3 で読み、iCalUID と開始で CalendarApp のイベントと突き合わせる
 
 ## ディレクトリ・ファイル構成
 

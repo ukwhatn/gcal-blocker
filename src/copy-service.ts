@@ -18,11 +18,10 @@ import {
   getCalendarLabel,
 } from './config';
 import { parseBlockMetadataFromDescription } from './calendar-service';
+import { OwnerResponse, getEventsApi, getOwnerResponse, listApiEvents } from './calendar-api';
 
 type ApiEvent = GoogleAppsScript.Calendar.Schema.Event;
-type EventsCollection = GoogleAppsScript.Calendar.Collection.EventsCollection;
 
-const PAGE_SIZE = 250;
 const GUEST_SECTION_HEADING = '# ゲスト';
 const MEET_SECTION_HEADING = '# Meet';
 const LOCATION_SEPARATOR = ' / ';
@@ -44,14 +43,6 @@ export const RSVP_CALENDAR_PARAM = 'cal';
 export const RSVP_EVENT_PARAM = 'ev';
 
 /**
- * 元イベントに記録されている自分の出欠
- */
-export interface OwnerResponse {
-  status: string;
-  comment: string;
-}
-
-/**
  * 元イベントへの出欠反映の結果
  * 権限エラー等は例外として投げ、出欠を持たない予定だけを notApplicable で返す
  */
@@ -69,21 +60,6 @@ export interface CopySnapshot {
 }
 
 /**
- * Advanced Calendar Service の Events コレクションを取得
- * @throws Advanced Calendar Service が有効化されていない場合
- */
-export function getEventsApi(): EventsCollection {
-  const events = Calendar.Events;
-  if (events == null) {
-    throw new Error(
-      'Advanced Calendar Service (Calendar API v3) is not enabled. ' +
-        'Add it to appsscript.json, deploy, and re-authorize the project.'
-    );
-  }
-  return events;
-}
-
-/**
  * コピー元カレンダーから、コピー対象イベントを取得して payload まで組み立てる
  * 除外対象（自動ブロック・非DEFAULT・除外prefix・キャンセル）はここで落とす
  */
@@ -94,7 +70,7 @@ export function listCopyCandidates(
 ): CopyCandidate[] {
   const label = getCalendarLabel(sourceCalendarId, config.labels);
 
-  return listEvents(sourceCalendarId, period)
+  return listApiEvents(sourceCalendarId, period)
     .filter((event) => isCopyable(event))
     .map((event) => {
       const sourceEventId = event.id ?? '';
@@ -148,7 +124,7 @@ export function listExistingCopies(
 export function listCopySnapshots(targetCalendarId: string, period: SyncPeriod): CopySnapshot[] {
   const snapshots: CopySnapshot[] = [];
 
-  for (const event of listEvents(targetCalendarId, period, {
+  for (const event of listApiEvents(targetCalendarId, period, {
     privateExtendedProperty: [`${COPY_MARKER_KEY}=${COPY_MARKER_VALUE}`],
   })) {
     const state = toExistingCopy(event);
@@ -339,22 +315,6 @@ export function buildCopyPayload(
 }
 
 /**
- * コピー元カレンダーの所有者の出欠を取得
- * getMyStatus() は実行ユーザーの出欠を返すため、所有者アドレスとの一致で判定する
- */
-export function getOwnerResponse(event: ApiEvent, sourceCalendarId: string): OwnerResponse {
-  const owner = sourceCalendarId.toLowerCase();
-  const attendee = (event.attendees ?? []).find(
-    (candidate) => candidate.email?.toLowerCase() === owner
-  );
-
-  return {
-    status: attendee?.responseStatus ?? RESPONSE_NONE,
-    comment: attendee?.comment ?? '',
-  };
-}
-
-/**
  * 出欠変更ページの URL を組み立てる
  * 出欠を持たない予定にはリンクを載せない（開いても操作できないため）
  */
@@ -469,30 +429,4 @@ function joinLocation(location: string | undefined, meetUrl: string | undefined)
   return [location?.trim(), meetUrl]
     .filter((part): part is string => !!part)
     .join(LOCATION_SEPARATOR);
-}
-
-function listEvents(
-  calendarId: string,
-  period: SyncPeriod,
-  extraArgs: Record<string, unknown> = {}
-): ApiEvent[] {
-  const api = getEventsApi();
-  const events: ApiEvent[] = [];
-  let pageToken: string | undefined;
-
-  do {
-    const page = api.list(calendarId, {
-      timeMin: period.start.toISOString(),
-      timeMax: period.end.toISOString(),
-      singleEvents: true,
-      showDeleted: false,
-      maxResults: PAGE_SIZE,
-      pageToken,
-      ...extraArgs,
-    });
-    events.push(...(page.items ?? []));
-    pageToken = page.nextPageToken;
-  } while (pageToken);
-
-  return events;
 }

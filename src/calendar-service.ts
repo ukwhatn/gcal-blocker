@@ -1,8 +1,10 @@
 import { BlockMetadata, BlockCandidate, SyncPeriod } from './types';
 import { BLOCK_TITLE, EXCLUDED_PREFIXES } from './config';
+import { getOwnerResponse, listApiEvents } from './calendar-api';
 
 type Calendar = GoogleAppsScript.Calendar.Calendar;
 type CalendarEvent = GoogleAppsScript.Calendar.CalendarEvent;
+type ApiEvent = GoogleAppsScript.Calendar.Schema.Event;
 
 /**
  * 1 回の読み取りで取得したカレンダーの状態
@@ -12,6 +14,8 @@ export interface CalendarSnapshot {
   calendarId: string;
   calendar: Calendar;
   events: CalendarEvent[];
+  /** カレンダー所有者が欠席した予定のキー（eventInstanceKey） */
+  declinedEventKeys: Set<string>;
 }
 
 /**
@@ -27,14 +31,44 @@ export function getCalendar(calendarId: string): Calendar {
 
 /**
  * カレンダーの対象期間のイベントを 1 回だけ読み取る
+ * 所有者の出欠は CalendarApp から取れないため、Calendar API v3 でも 1 回読む
  */
 export function readCalendarSnapshot(calendarId: string, period: SyncPeriod): CalendarSnapshot {
   const calendar = getCalendar(calendarId);
+  const declinedEventKeys = new Set(
+    listApiEvents(calendarId, period)
+      .filter((event) => getOwnerResponse(event, calendarId).status === 'declined')
+      .map((event) => apiEventInstanceKey(event))
+      .filter((key): key is string => key !== null)
+  );
+
   return {
     calendarId,
     calendar,
     events: calendar.getEvents(period.start, period.end),
+    declinedEventKeys,
   };
+}
+
+/**
+ * CalendarApp と Calendar API v3 のイベントを突き合わせるキー
+ * CalendarApp の getId() は iCalUID で、繰り返し予定の全回で同じ値になるため開始で区別する。
+ * 終日予定は API 側が日付しか持たないので、カレンダーのタイムゾーンでの日付で揃える
+ */
+function eventInstanceKey(event: CalendarEvent, timeZone: string): string {
+  const start = event.isAllDayEvent()
+    ? Utilities.formatDate(event.getStartTime(), timeZone, 'yyyy-MM-dd')
+    : String(event.getStartTime().getTime());
+  return `${event.getId()}|${start}`;
+}
+
+function apiEventInstanceKey(event: ApiEvent): string | null {
+  if (!event.iCalUID) return null;
+  if (event.start?.date) return `${event.iCalUID}|${event.start.date}`;
+  if (event.start?.dateTime) {
+    return `${event.iCalUID}|${new Date(event.start.dateTime).getTime()}`;
+  }
+  return null;
 }
 
 /**
@@ -64,13 +98,14 @@ export function getOriginFromMetadata(md: BlockMetadata): {
  * ブロック対象のイベントを取得
  * - 内部系統の自動ブロックは除外（direct source ベース、無限ループ防止）
  * - 外部系統の自動ブロックは出欠フィルタを bypass して伝搬対象に
- * - 通常イベントは「明示的に NO」のみ除外（別アカウント実行時 getMyStatus が null になる対応）
+ * - 通常イベントはカレンダー所有者が欠席したものだけ除外（出欠の無い予定は対象に残す）
  */
 export function getBlockableEvents(
   snapshot: CalendarSnapshot,
   internalCalendarIds: string[]
 ): BlockCandidate[] {
   const calendarId = snapshot.calendarId;
+  const timeZone = snapshot.calendar.getTimeZone();
 
   return snapshot.events
     .filter((event) => {
@@ -89,12 +124,8 @@ export function getBlockableEvents(
       if (!isDefaultEventType(event)) return false;
       // 「予定なし」（transparent）のイベントは除外
       if (getEventTransparency(event) === eventTransparency('TRANSPARENT')) return false;
-      // 4. 出欠フィルタ: 明示的に NO の場合のみ除外
-      //    別アカウント実行時 getMyStatus() が null を返すケースがあり（例: ゲストなしで他人 owner のイベント）、
-      //    厳密フィルタだと通常イベントが伝搬されないため緩和
-      const status = event.getMyStatus();
-      if (status === CalendarApp.GuestStatus.NO) return false;
-      return true;
+      // 4. 出欠フィルタ: カレンダー所有者が欠席した予定のみ除外
+      return !snapshot.declinedEventKeys.has(eventInstanceKey(event, timeZone));
     })
     .map((event) => {
       const md = parseBlockMetadata(event);
