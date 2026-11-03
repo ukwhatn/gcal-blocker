@@ -118,8 +118,8 @@ bun run deploy:satellite
 |------|-----|
 | タイトル | `[LABEL] 元タイトル`（LABEL は `CALENDAR_LABELS`、未設定時はドメインから導出） |
 | 出欠マーク | タイトルの LABEL の後に付与。欠席 `❌` / 未定 `△` / 未応答 `？`（参加・出欠なしは付けない） |
-| description | `# 返信メモ`（自分の RSVP コメント）＋ 元 description ＋ `# ゲスト`（アドレス列挙）＋ `# Meet`（URL）＋ `# 出欠変更`（[出欠変更ページ](#出欠入力ウェブアプリ)の URL） |
-| location | 元 location と Meet URL |
+| description | `# 返信メモ`（自分の RSVP コメント）＋ 元 description ＋ `# ゲスト`（アドレス列挙）＋ `# Meet`（URL。欠席した予定には載せない）＋ `# 出欠変更`（[出欠変更ページ](#出欠入力ウェブアプリ)の URL） |
+| location | 元 location と Meet URL（欠席した予定は元 location のみ） |
 | 開始/終了 | 元と同一（終日は終日イベント） |
 | 公開設定 | 元と同一（default / public / private） |
 | 予定の有無 | 元と同一（opaque / transparent）。欠席した予定は `transparent` |
@@ -135,7 +135,7 @@ bun run deploy:satellite
 
 自動ブロックイベント / Tasks・誕生日等の非 DEFAULT イベント / `EXCLUDED_PREFIXES` で始まるタイトル / キャンセル済み予定。
 
-「予定なし（transparent）」の予定・終日予定・未応答の招待はコピーする。**欠席（declined）した予定もコピーする**（ウェブアプリから出欠を取り消せるようにするため。タイトルに `❌` を付け、`transparent` で空き時間として扱う）。
+「予定なし（transparent）」の予定・終日予定・未応答の招待はコピーする。**欠席（declined）した予定もコピーする**（ウェブアプリから出欠を取り消せるようにするため。タイトルに `❌` を付け、`transparent` で空き時間として扱う）。会議を自動で開くツール（Raycast 等）が参加しない会議を開かないよう、Meet URL は location にも description にも載せない。
 
 ### 更新と削除
 

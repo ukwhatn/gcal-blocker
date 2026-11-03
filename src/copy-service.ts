@@ -293,7 +293,8 @@ export function buildCopyPayload(
   owner: OwnerResponse,
   rsvpUrl: string
 ): ApiEvent {
-  const meetUrl = getMeetUrl(event);
+  // 欠席した予定に会議 URL を残すと、カレンダーから会議を自動で開くツールが参加しない会議を開く
+  const meetUrl = owner.status === 'declined' ? undefined : getMeetUrl(event);
   const mark = RESPONSE_MARKS[owner.status];
   const payload: ApiEvent = {
     summary: `[${label.label}] ${mark ? `${mark} ` : ''}${event.summary || UNTITLED_EVENT_TITLE}`,

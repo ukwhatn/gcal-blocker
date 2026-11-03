@@ -113,7 +113,7 @@ src/
 - **返信メモは `attendees[].comment`** なので主催者と他ゲストに見える。集約カレンダー側には description の `# 返信メモ` として出る
 - コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` だけ
 - `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
-- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）
+- 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）。Meet URL は location・description とも載せない（Raycast 等の会議自動起動が誤って開くため）
 - **ウェブアプリはコード push だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
 
 ### スクリプトプロパティ
