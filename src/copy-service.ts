@@ -302,7 +302,8 @@ export function buildCopyPayload(
     location: joinLocation(event.location, meetUrl),
     start: event.start,
     end: event.end,
-    visibility: event.visibility ?? 'default',
+    // default は共通カレンダーの共有権限に従い中身が見えてしまうため、明示的に公開した予定だけ公開で写す
+    visibility: event.visibility === 'public' ? 'public' : 'private',
     // 欠席した予定は空き時間として見せる（コピーは残して出欠を取り消せるようにする）
     transparency: owner.status === 'declined' ? 'transparent' : (event.transparency ?? 'opaque'),
     reminders: { useDefault: false, overrides: [] },
@@ -345,6 +346,7 @@ function toExistingCopy(event: ApiEvent): ExistingCopy | null {
     eventId,
     summary: event.summary ?? '',
     description: event.description ?? '',
+    visibility: event.visibility ?? 'default',
     sourceCalendarId: metadata.sourceCalendarId,
     sourceEventId: metadata.sourceEventId,
     sourceUpdated: metadata.sourceUpdated ?? '',
