@@ -96,7 +96,7 @@ src/
 - **削除責任分離**: 作成・更新・削除はすべて自プロジェクトの `COPY_SOURCE_IDS` 由来のコピーのみが対象
 - コピー先カレンダーは `CALENDAR_IDS` に含めてはならない（`getCopyConfig()` が検証してエラーにする）
 - ゲストは招待せず description に列挙する（実在の相手に招待メールが飛ぶため）
-- 公開設定は、元が `public` のときだけ `public`、`default` と `private` は `private` で写す（`default` は共通カレンダーの共有権限に従い、詳細表示権限の相手に中身が見えるため）。更新判定でも visibility の差を見る
+- 公開設定は元の値をそのまま写す。ただし集約カレンダー側で手で変えた値は上書きしない。コピー同期が最後に書いた値をメタの `syncedVisibility` に残し、今の値と違えば手で変えたとみなす（`keepManualVisibility`）。`syncedVisibility` を持たないコピーは、旧規則（`public` だけ `public`、ほかは `private`）で書いた値を最後の同期値とみなす
 - 更新判定は `Event.updated` / 出欠 / 返信メモの変化に加え、**組み立てた summary・description と現在のコピーの差**を見る（元イベントの updated だけだと、コピーの組み立て方を変えたときに既存コピーが更新されない）
 
 ## 出欠変更ページ（ウェブアプリ）
@@ -109,7 +109,7 @@ src/
 - Calendar API は RSVP の変更に「そのカレンダーへの書き込み権限」を要求するため、CalD の予定はメインから直接書けない。入力をコピーの `pendingAt` / `pendingResponse` / `pendingComment` に置き、**各プロジェクトの `copyEvents` が自分の `COPY_SOURCE_IDS` 由来の入力だけを反映する**（メイン担当分は `submitResponse` 内で即時反映）
 - 元イベントへの書き込みは attendees 配列ごと patch する（自分のエントリだけを差し替える。配列を部分送信すると他のゲストが消える）。反映結果は patch のレスポンスから読み直して保存する
 - **返信メモは `attendees[].comment`** なので主催者と他ゲストに見える。集約カレンダー側には description の `# 返信メモ` として出る
-- コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` だけ
+- コピー同期の patch はウェブアプリが書いたメタを既存値からマージして保持する。コピー同期側が書くのは `isCopy` / `sourceCalendarId` / `sourceEventId` / `sourceUpdated` / `responseStatus` / `responseComment` / `syncedVisibility` だけ
 - `submitResponse` は `copyEvents` と同じ ScriptLock を取る（同時 patch による入力消失の防止）
 - 欠席にしたコピーは削除せず、タイトルに `❌` を付けて `transparent` にする（ページから取り消せるようにするため）。Meet URL は location・description とも載せない（Raycast 等の会議自動起動が誤って開くため）
 - **ウェブアプリは `deploy:main` だけでは更新されない**。GAS エディタで「デプロイを管理 > 編集 > バージョン: 新バージョン」が必要
@@ -125,7 +125,7 @@ src/
 
 ### メタデータ設計
 
-コピーイベントのメタは `extendedProperties.private`（Calendar API v3）。コピー同期が書く 6 キーに加え、ウェブアプリが `pendingAt` / `pendingResponse` / `pendingComment` を、反映処理が `responseError` を書く。Calendar API は値を削除できないため、消費済みの入力は空文字で消す（`pendingAt` の有無が未反映の入力があるかの判定）。
+コピーイベントのメタは `extendedProperties.private`（Calendar API v3）。コピー同期が書く 7 キーに加え、ウェブアプリが `pendingAt` / `pendingResponse` / `pendingComment` を、反映処理が `responseError` を書く。Calendar API は値を削除できないため、消費済みの入力は空文字で消す（`pendingAt` の有無が未反映の入力があるかの判定）。
 
 ブロックイベントの description には JSON 形式でメタデータを埋め込む。
 

@@ -4,6 +4,7 @@ import {
   applyResponseToSourceEvent,
   deleteCopy,
   insertCopy,
+  keepManualVisibility,
   listCopyCandidates,
   listExistingCopies,
   patchCopy,
@@ -195,8 +196,9 @@ function applyCandidate(
   }
 
   const [current, ...duplicates] = existing;
-  if (needsPatch(current, candidate)) {
-    patchCopy(targetCalendarId, current, candidate);
+  const target = keepManualVisibility(current, candidate);
+  if (needsPatch(current, target)) {
+    patchCopy(targetCalendarId, current, target);
     console.log(`  更新: ${candidate.payload.summary}`);
     result.updated++;
   }
@@ -221,7 +223,8 @@ function needsPatch(current: ExistingCopy, candidate: CopyCandidate): boolean {
     current.responseComment !== candidate.responseComment ||
     current.summary !== (candidate.payload.summary ?? '') ||
     current.description !== (candidate.payload.description ?? '') ||
-    current.visibility !== candidate.payload.visibility
+    current.visibility !== candidate.payload.visibility ||
+    current.syncedVisibility !== candidate.payload.extendedProperties?.private?.syncedVisibility
   );
 }
 

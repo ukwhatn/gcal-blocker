@@ -76,6 +76,12 @@ export function listCopyCandidates(
       const sourceEventId = event.id ?? '';
       const sourceUpdated = event.updated ?? '';
       const owner = getOwnerResponse(event, sourceCalendarId);
+      const payload = buildCopyPayload(
+        event,
+        label,
+        owner,
+        buildRsvpUrl(config, sourceCalendarId, sourceEventId, owner)
+      );
 
       return {
         key: buildCopyKey(sourceCalendarId, sourceEventId),
@@ -85,14 +91,15 @@ export function listCopyCandidates(
         responseStatus: owner.status,
         responseComment: owner.comment,
         payload: {
-          ...buildCopyPayload(
-            event,
-            label,
-            owner,
-            buildRsvpUrl(config, sourceCalendarId, sourceEventId, owner)
-          ),
+          ...payload,
           extendedProperties: {
-            private: buildCopyMetadata(sourceCalendarId, sourceEventId, sourceUpdated, owner),
+            private: buildCopyMetadata(
+              sourceCalendarId,
+              sourceEventId,
+              sourceUpdated,
+              owner,
+              payload.visibility ?? 'default'
+            ),
           },
         },
       };
@@ -302,8 +309,7 @@ export function buildCopyPayload(
     location: joinLocation(event.location, meetUrl),
     start: event.start,
     end: event.end,
-    // default は共通カレンダーの共有権限に従い中身が見えてしまうため、明示的に公開した予定だけ公開で写す
-    visibility: event.visibility === 'public' ? 'public' : 'private',
+    visibility: event.visibility ?? 'default',
     // 欠席した予定は空き時間として見せる（コピーは残して出欠を取り消せるようにする）
     transparency: owner.status === 'declined' ? 'transparent' : (event.transparency ?? 'opaque'),
     reminders: { useDefault: false, overrides: [] },
@@ -314,6 +320,32 @@ export function buildCopyPayload(
   }
 
   return payload;
+}
+
+/**
+ * 集約カレンダー側で手で変えた公開設定を残すよう、書き込む内容を組み替える
+ * コピー同期が最後に書いた値と今の値が違えば手で変えたとみなし、元の予定の公開設定では上書きしない
+ */
+export function keepManualVisibility(current: ExistingCopy, candidate: CopyCandidate): CopyCandidate {
+  const lastSynced = current.syncedVisibility || legacySyncedVisibility(candidate.payload.visibility);
+  if (current.visibility === lastSynced) return candidate;
+
+  return {
+    ...candidate,
+    payload: {
+      ...candidate.payload,
+      visibility: current.visibility,
+      extendedProperties: {
+        private: { ...candidate.payload.extendedProperties?.private, syncedVisibility: lastSynced },
+      },
+    },
+  };
+}
+
+// shortcut: syncedVisibility を持たないコピーは、public だけ public・ほかは private で写していた頃の値とみなす。
+// 集約カレンダーの全コピーに syncedVisibility が入ったら消す
+function legacySyncedVisibility(sourceVisibility: string | undefined): string {
+  return sourceVisibility === 'public' ? 'public' : 'private';
 }
 
 /**
@@ -347,6 +379,7 @@ function toExistingCopy(event: ApiEvent): ExistingCopy | null {
     summary: event.summary ?? '',
     description: event.description ?? '',
     visibility: event.visibility ?? 'default',
+    syncedVisibility: metadata.syncedVisibility ?? '',
     sourceCalendarId: metadata.sourceCalendarId,
     sourceEventId: metadata.sourceEventId,
     sourceUpdated: metadata.sourceUpdated ?? '',
@@ -364,7 +397,8 @@ function buildCopyMetadata(
   sourceCalendarId: string,
   sourceEventId: string,
   sourceUpdated: string,
-  owner: OwnerResponse
+  owner: OwnerResponse,
+  visibility: string
 ): CopyMetadata {
   return {
     isCopy: COPY_MARKER_VALUE,
@@ -373,6 +407,7 @@ function buildCopyMetadata(
     sourceUpdated,
     responseStatus: owner.status,
     responseComment: owner.comment,
+    syncedVisibility: visibility,
   };
 }
 
