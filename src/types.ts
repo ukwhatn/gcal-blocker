@@ -96,6 +96,7 @@ export interface CopyMetadata {
   sourceUpdated: string;
   responseStatus: string;
   responseComment: string;
+  syncedVisibility: string; // コピー同期が最後に書いた公開設定。今の値と違えば集約カレンダー側で手で変えたとみなす
 }
 
 /**
@@ -122,6 +123,7 @@ export interface ExistingCopy {
   summary: string; // コピー先に現在書かれている内容。組み立て直した payload と比べて更新要否を決める
   description: string;
   visibility: string;
+  syncedVisibility: string;
   sourceCalendarId: string;
   sourceEventId: string;
   sourceUpdated: string;
